@@ -4,7 +4,6 @@ import numpy as np
 from torchsummary import summary
 class MLP(nn.Module):
     def __init__(self,
-                 image,
                  n_layers,
                  n_units,
                  n_inputs=1,
@@ -12,7 +11,6 @@ class MLP(nn.Module):
                  bn=False,
                  act='tanh'):
         super(MLP, self).__init__()
-        self.shape = image.shape
         self.n_layers = n_layers
         self.n_units = n_units
         self.n_inputs = n_inputs
