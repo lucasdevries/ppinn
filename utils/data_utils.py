@@ -52,7 +52,7 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                 values = np.array([i, j, k, i/k])
                 perfusion_values[ix, jx, kx] = values
     perfusion_values = repeat(perfusion_values, 'cbv h w values -> n cbv (h r1) (w r2) values', n=3, r1=32, r2=32)
-    perfusion_data = rearrange(perfusion_data, '(n cbv) t h w -> n cbv t h w', n=3)
+    perfusion_data = rearrange(perfusion_data, '(n cbv) t h w -> n cbv h w t', n=3)
 
     time = np.array([float(x) for x in range(0, 60, 2)])
     # x = x.repeat(self.shape[0], self.shape[1], 1)
@@ -62,8 +62,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     data_dict = {'aif': aif_data,
                  'vof': vof_data,
                  'time': time,
-                 'curves': perfusion_data,
-                 'perfusion_values': perfusion_values}
+                 'curves': perfusion_data[2:,4:,:1,-32:-30,:],
+                 'perfusion_values': perfusion_values[2:, 4:, :1, -32:-30,:]}
 
     data_dict = normalize_data(data_dict)
     data_dict = get_coll_points(data_dict)
@@ -74,8 +74,9 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
 def normalize_data(data_dict):
     # input normalization
     data_dict['std_t'] = data_dict['time'].std()
+    data_dict['mean_t'] = data_dict['time'].mean()
     data_dict['time'] = (data_dict['time'] - data_dict['time'].mean()) / data_dict['time'].std()
-
+    data_dict['fixed_mtt'] = (3.42 - data_dict['mean_t']) / data_dict['std_t']
     # output normalization
     max_ = data_dict['aif'].max()
     data_dict['aif'] /= max_
@@ -95,7 +96,7 @@ def get_coll_points(data_dict):
 
 def get_tensors(data_dict):
     for key in data_dict.keys():
-        data_dict[key] = torch.as_tensor(data_dict[key])
+        data_dict[key] = torch.as_tensor(data_dict[key], dtype=torch.float32)
     return data_dict
 
 
