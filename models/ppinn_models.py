@@ -32,7 +32,7 @@ class PPINN(nn.Module):
         # self.hemo_scaling = torch.as_tensor(((100*0.55)/(1.05*0.75))).to(self.device)
         # initialize flow parameters
         low = 0
-        high = 100
+        high = 100 / 69.84
         self.flow_cbf = torch.nn.Parameter(torch.FloatTensor(*self.shape_in, 1).uniform_(low, high))
         self.NN = MLP(
             self.shape_in,
@@ -54,18 +54,19 @@ class PPINN(nn.Module):
     def forward(self, t):
         # Get ODE params
         params = self.get_ode_params()
+
         # Get NN output
         c_aif, c_tissue = self.NN(t)
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
         # Get NN output at MTT time
         t.requires_grad = False
-        c_aif_b, _ = self.NN(t-3.4/self.std_t)
+        c_aif_b, _ = self.NN(t-4./self.std_t)
         # print('sizes')
         # print(c_tissue_dt)
         # print((c_aif - c_aif_b))
         # Define residual
-        residual = c_tissue_dt - 10**-4*params * (c_aif - c_aif_b)
+        residual = c_tissue_dt - params * (c_aif - c_aif_b)
         # print(residual)
         # residual = None
         return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
@@ -91,6 +92,17 @@ class PPINN(nn.Module):
 
     def get_ode_params(self):
         return self.flow_cbf
+
+    def get_cbf(self, seconds: object = True):
+        density = 1.05
+        constant = (100/density) * 0.55 / 0.75
+        constant = torch.as_tensor(constant).to(self.device)
+        f_s = self.get_ode_params()
+        if seconds:
+            return constant * f_s
+        else:
+            return constant * f_s * 60
+
 
     def define_interpolator(self, time, aif, mode='quadratic'):
         self.interpolator = interp1d(time, aif,
@@ -122,7 +134,8 @@ class PPINN(nn.Module):
                               batch_curves,
                               batch_boundary,
                               batch_collopoints, ep)
-            if ep%1000 == 0:
+            if ep%300 == 0 or ep ==1:
+                # print(self.get_cbf(seconds=False))
                 self.plot_params(0,0,gt,ep)
     def optimize(self,
                  batch_time,
@@ -185,7 +198,7 @@ class PPINN(nn.Module):
         #     plt.title('residuals squared')
         #     plt.imshow(torch.square(residual)[0,0,:,:,0].cpu().detach().numpy())
         #     plt.show()
-        loss_r = 1 * torch.mean(torch.square(residual))
+        loss_r = torch.mean(torch.square(residual))
         # print(self.get_ode_params())
         return loss_r
 
@@ -216,9 +229,10 @@ class PPINN(nn.Module):
         return out
 
     def plot_params(self, i, j, perfusion_values, epoch):
-        params = self.get_ode_params()
+        params = self.get_cbf(seconds=False)
+        # print(self.get_ode_params())
         for par in range(params.shape[-1]):
-            # print(params[i,j,:,:,par])
+            print(params[i,j,:,:,par])
             fig, ax = plt.subplots(2, 1)
             ax[0].set_title('Epoch: {}'.format(epoch))
             im = ax[0].imshow(params[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=90)
