@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+from tqdm import tqdm
 class PPINN(nn.Module):
     def __init__(self,
                  shape_in,
@@ -28,12 +29,11 @@ class PPINN(nn.Module):
         self.std_t = std_t
         self.neurons_out = 2
         # initialize flow parameters
+        # self.hemo_scaling = torch.as_tensor(((100*0.55)/(1.05*0.75))).to(self.device)
+        # initialize flow parameters
         low = 0
         high = 100
         self.flow_cbf = torch.nn.Parameter(torch.FloatTensor(*self.shape_in, 1).uniform_(low, high))
-        self.fixed_mtt = torch.tensor(-1.4776831518357147)
-        self.fixed_mtt.requires_grad = False
-        self.fixed_mtt.to(self.device)
         self.NN = MLP(
             self.shape_in,
             n_layers,
@@ -43,6 +43,7 @@ class PPINN(nn.Module):
             bn=bn,
             act='tanh'
         )
+
         self.current_iteration = 0
         self.set_lr(lr)
         self.set_loss_weights(loss_weights)
@@ -57,25 +58,16 @@ class PPINN(nn.Module):
         c_aif, c_tissue = self.NN(t)
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
-        # if self.current_iteration %10 == 0:
-        #     plt.plot(c_tissue_dt.cpu().squeeze().detach().numpy())
-        #     plt.show()
-        # coordinates = (t,)
-
-        # print((1 / self.std_t) * torch.gradient(c_tissue.squeeze(), spacing=coordinates)[0])
         # Get NN output at MTT time
         t.requires_grad = False
-        # print(t-self.fixed_mtt)
         c_aif_b, _ = self.NN(t-3.4/self.std_t)
-        # c_aif_b = None
         # print('sizes')
         # print(c_tissue_dt)
         # print((c_aif - c_aif_b))
         # Define residual
         residual = c_tissue_dt - 10**-4*params * (c_aif - c_aif_b)
+        # print(residual)
         # residual = None
-
-        # print(residual.shape)
         return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
 
     def set_loss_weights(self, loss_weights):
@@ -113,12 +105,13 @@ class PPINN(nn.Module):
             data_curves,
             data_collopoints,
             data_boundary,
+            gt,
             batch_size,
             epochs):
 
         t0 = time.time()
         collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True)
-        for ep in range(self.current_iteration + 1, self.current_iteration + epochs + 1):
+        for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
             for batch_collopoints in collopoints_dataloader:
                 batch_time = data_time
                 batch_aif = data_aif
@@ -129,11 +122,8 @@ class PPINN(nn.Module):
                               batch_curves,
                               batch_boundary,
                               batch_collopoints, ep)
-                # optimized_parameters = self.get_ode_params()
-                # plt.imshow(optimized_parameters[2,4,:,:,0].cpu().detach().numpy())
-                # plt.show()
-
-
+            if ep%1000 == 0:
+                self.plot_params(0,0,gt,ep)
     def optimize(self,
                  batch_time,
                  batch_aif,
@@ -158,30 +148,17 @@ class PPINN(nn.Module):
             # compute data loss
             output = self.forward(batch_time)
             loss += self.lw_data * self.__loss_data(batch_aif, batch_curves, output)
-
-            c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual = output
-
-            # if epoch%30 == 0:
-            #     plt.plot(batch_time.cpu().numpy(),c_tissue[0,0,0,0].cpu().detach().numpy(), c='r')
-            #     plt.plot(batch_time.cpu().numpy(), batch_curves[0,0,0,0].cpu().detach().numpy(), c='g')
-            #     plt.text(0,0.17,epoch)
-            #     # plt.plot(batch_time.cpu().numpy(),batch_aif.cpu().numpy(), c='k')
-            #     plt.show()
-
-
         if self.lw_res:
             # compute residual loss
             output = self.forward(batch_collopoints)
-            c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual = output
             loss += self.lw_res * self.__loss_residual(output)
         if self.lw_bc:
             # compute bc loss
             output = self.forward(batch_boundary)
             loss += self.lw_bc * self.__loss_bc(output)
-        # todo implepent backwars pass
+
         if np.isnan(float(loss.item())):
             raise ValueError('Loss is nan during training...')
-
 
         # optimizer
         loss.backward()
@@ -204,8 +181,12 @@ class PPINN(nn.Module):
 
     def __loss_residual(self, output):
         _, _, _, _, _, residual = output
+        # if epoch%5000==0:
+        #     plt.title('residuals squared')
+        #     plt.imshow(torch.square(residual)[0,0,:,:,0].cpu().detach().numpy())
+        #     plt.show()
         loss_r = 1 * torch.mean(torch.square(residual))
-        print(self.get_ode_params())
+        # print(self.get_ode_params())
         return loss_r
 
     def __loss_bc(self, output):
@@ -233,3 +214,17 @@ class PPINN(nn.Module):
             create_graph=True,
         )[0]
         return out
+
+    def plot_params(self, i, j, perfusion_values, epoch):
+        params = self.get_ode_params()
+        for par in range(params.shape[-1]):
+            # print(params[i,j,:,:,par])
+            fig, ax = plt.subplots(2, 1)
+            ax[0].set_title('Epoch: {}'.format(epoch))
+            im = ax[0].imshow(params[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=90)
+            im = ax[1].imshow(perfusion_values[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=90)
+            for x in ax:
+                x.set_axis_off()
+            plt.tight_layout()
+            fig.colorbar(im, ax=ax.ravel().tolist(),location="bottom")
+            plt.show()

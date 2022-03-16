@@ -62,8 +62,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     data_dict = {'aif': aif_data,
                  'vof': vof_data,
                  'time': time,
-                 'curves': perfusion_data[2:,4:,:1,-32:-30,:],
-                 'perfusion_values': perfusion_values[2:, 4:, :1, -32:-30,:]}
+                 'curves': perfusion_data[2:,4:,0:1,-2:,:],
+                 'perfusion_values': perfusion_values[2:, 4:, 0:1, -2:,:]}
 
     data_dict = normalize_data(data_dict)
     data_dict = get_coll_points(data_dict)
@@ -76,7 +76,6 @@ def normalize_data(data_dict):
     data_dict['std_t'] = data_dict['time'].std()
     data_dict['mean_t'] = data_dict['time'].mean()
     data_dict['time'] = (data_dict['time'] - data_dict['time'].mean()) / data_dict['time'].std()
-    data_dict['fixed_mtt'] = (3.42 - data_dict['mean_t']) / data_dict['std_t']
     # output normalization
     max_ = data_dict['aif'].max()
     data_dict['aif'] /= max_
@@ -108,3 +107,4 @@ def apply_gaussian_filter(type, array, sd):
         return gaussian_filter(array, sigma=(0, 0, sd, sd), mode='nearest')
     else:
         raise NotImplementedError('Gaussian filter variant not implemented.')
+
