@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+from einops.einops import repeat
 from tqdm import tqdm
 class PPINN(nn.Module):
     def __init__(self,
@@ -14,6 +15,7 @@ class PPINN(nn.Module):
                  n_layers,
                  n_units,
                  lr,
+                 perfusion_values,
                  loss_weights=(1, 1, 0),
                  bn=False,
                  trainable_params='all',
@@ -28,6 +30,9 @@ class PPINN(nn.Module):
         self.shape_in = shape_in
         self.std_t = std_t
         self.neurons_out = 2
+        self.mtts =  perfusion_values[..., 2] * 60
+        self.mtts = self.mtts.unsqueeze(-1)
+        self.mtts = self.mtts.to(self.device)
         # initialize flow parameters
         # self.hemo_scaling = torch.as_tensor(((100*0.55)/(1.05*0.75))).to(self.device)
         # initialize flow parameters
@@ -52,19 +57,19 @@ class PPINN(nn.Module):
         self.float()
 
     def forward(self, t):
+        length = t.shape[0]
         # Get ODE params
         params = self.get_ode_params()
-
+        t = t.repeat(*self.shape_in, 1).unsqueeze(-1)
         # Get NN output
         c_aif, c_tissue = self.NN(t)
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
         # Get NN output at MTT time
-        t.requires_grad = False
-        c_aif_b, _ = self.NN(t-4./self.std_t)
-        # print('sizes')
-        # print(c_tissue_dt)
-        # print((c_aif - c_aif_b))
+        # t.requires_grad = False
+
+        mtt_s = self.mtts.repeat(1,1,1,1,length).unsqueeze(-1)
+        c_aif_b, _ = self.NN(t-mtt_s/self.std_t)
         # Define residual
         residual = c_tissue_dt - params * (c_aif - c_aif_b)
         # print(residual)
@@ -103,7 +108,6 @@ class PPINN(nn.Module):
         else:
             return constant * f_s * 60
 
-
     def define_interpolator(self, time, aif, mode='quadratic'):
         self.interpolator = interp1d(time, aif,
                                      kind=mode,
@@ -134,9 +138,10 @@ class PPINN(nn.Module):
                               batch_curves,
                               batch_boundary,
                               batch_collopoints, ep)
-            if ep%300 == 0 or ep ==1:
+            if ep%300 == 0:
                 # print(self.get_cbf(seconds=False))
                 self.plot_params(0,0,gt,ep)
+
     def optimize(self,
                  batch_time,
                  batch_aif,
@@ -160,6 +165,11 @@ class PPINN(nn.Module):
         if self.lw_data:
             # compute data loss
             output = self.forward(batch_time)
+            tissue = output[2]
+            print(tissue.shape)
+            for i in range(10):
+                plt.plot(tissue[0,0,i,0,:].cpu().detach().numpy())
+            plt.show()
             loss += self.lw_data * self.__loss_data(batch_aif, batch_curves, output)
         if self.lw_res:
             # compute residual loss
@@ -235,8 +245,8 @@ class PPINN(nn.Module):
             print(params[i,j,:,:,par])
             fig, ax = plt.subplots(2, 1)
             ax[0].set_title('Epoch: {}'.format(epoch))
-            im = ax[0].imshow(params[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=90)
-            im = ax[1].imshow(perfusion_values[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=90)
+            im = ax[0].imshow(params[i,j,:,:,par].cpu().detach().numpy(), vmin=torch.min(perfusion_values[i,j,:,:,par]), vmax=torch.max(perfusion_values[i,j,:,:,par]))
+            im = ax[1].imshow(perfusion_values[i,j,:,:,par].cpu().detach().numpy(), vmin=torch.min(perfusion_values[i,j,:,:,par]), vmax=torch.max(perfusion_values[i,j,:,:,par]))
             for x in ax:
                 x.set_axis_off()
             plt.tight_layout()

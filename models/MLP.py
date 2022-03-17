@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import numpy as np
+from einops.layers.torch import Rearrange
 from torchsummary import summary
 class MLP(nn.Module):
     def __init__(self,
@@ -13,6 +14,7 @@ class MLP(nn.Module):
                  act='tanh'):
         super(MLP, self).__init__()
         self.shape_in = shape_in
+        print(shape_in)
         self.n_layers = n_layers
         self.n_units = n_units
         self.n_inputs = n_inputs
@@ -20,7 +22,8 @@ class MLP(nn.Module):
         if not bn:
             self.bn = False
         else:
-            raise NotImplementedError('Batchnorm not yet working, maybe layernorm?')
+            # raise NotImplementedError('Batchnorm not yet working, maybe layernorm?')
+            self.bn = True
         if act == 'tanh':
             self.act = nn.Tanh()
         else:
@@ -34,13 +37,21 @@ class MLP(nn.Module):
             layers.append(self.act)
             layers.append(nn.Linear(self.n_units, self.n_units))
             if self.bn:
+                layers.append(Rearrange('cbv n h w b t -> (cbv n h w b) t'))
                 layers.append(nn.BatchNorm1d(self.n_units))
+                layers.append(Rearrange('(cbv n h w b) t -> cbv n h w b t',
+                                        cbv=self.shape_in[0],
+                                        n=self.shape_in[1],
+                                        h=self.shape_in[2],
+                                        w=self.shape_in[3]))
         layers.append(self.act)
-        layers.append(nn.Linear(self.n_units, self.neurons_out))
+        layers.append(nn.Linear(self.n_units, self.neurons_out * self.shape_in[0] * self.shape_in[1] * self.shape_in[2] * self.shape_in[3] )
+        layers.append(Rearrange('(type cbv h w) -> units type cbv h w'), units=self.shape_in[0], type=self.shape_in[1]
+                      )
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = x.repeat(*self.shape_in, 1).unsqueeze(-1)
+        # x = x.repeat(*self.shape_in, 1).unsqueeze(-1)
         x = self.net(x)
         # return c_aif and c_tissue
         return x[..., 0], x[..., 1]
