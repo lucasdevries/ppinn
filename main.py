@@ -4,7 +4,7 @@ from models.ppinn_models import PPINN
 from torch.utils.data import DataLoader
 
 def train():
-    data_dict = data_utils.load_data(gaussian_filter_type=False)
+    data_dict = data_utils.load_data(gaussian_filter_type='spatial')
     for i in range(30):
         plt.plot(data_dict['curves'][0,0,0,i,:].numpy())
     plt.ylim(0.05, 0.3)
@@ -12,10 +12,10 @@ def train():
     shape_in = data_dict['perfusion_values'].shape[:-1]  # (3, 5, 224, 224)
     ppinn = PPINN(shape_in=shape_in,
                                n_layers=2,
-                               n_units=128,
+                               n_units=32,
                                lr=1e-3,
                                perfusion_values=data_dict['perfusion_values'],
-                               loss_weights=(1, 10, 0),
+                               loss_weights=(1, 1, 0),
                                bn=False,
                                trainable_params='all',
                                n_inputs=1,

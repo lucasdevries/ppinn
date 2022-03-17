@@ -22,8 +22,8 @@ class MLP(nn.Module):
         if not bn:
             self.bn = False
         else:
-            # raise NotImplementedError('Batchnorm not yet working, maybe layernorm?')
-            self.bn = True
+            raise NotImplementedError('Batchnorm not yet working, maybe layernorm?')
+            # self.bn = True
         if act == 'tanh':
             self.act = nn.Tanh()
         else:
@@ -45,9 +45,13 @@ class MLP(nn.Module):
                                         h=self.shape_in[2],
                                         w=self.shape_in[3]))
         layers.append(self.act)
-        layers.append(nn.Linear(self.n_units, self.neurons_out * self.shape_in[0] * self.shape_in[1] * self.shape_in[2] * self.shape_in[3] )
-        layers.append(Rearrange('(type cbv h w) -> units type cbv h w'), units=self.shape_in[0], type=self.shape_in[1]
-                      )
+        layers.append(nn.Linear(self.n_units, self.neurons_out * self.shape_in[0] * self.shape_in[1] * self.shape_in[2] * self.shape_in[3]))
+        layers.append(Rearrange('b (curves type cbv h w) -> type cbv h w b curves',
+                                curves=2,
+                                type=self.shape_in[0],
+                                cbv=self.shape_in[1],
+                                h=self.shape_in[2],
+                                w=self.shape_in[3]))
         return nn.Sequential(*layers)
 
     def forward(self, x):

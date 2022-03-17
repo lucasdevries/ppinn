@@ -37,7 +37,7 @@ class PPINN(nn.Module):
         # self.hemo_scaling = torch.as_tensor(((100*0.55)/(1.05*0.75))).to(self.device)
         # initialize flow parameters
         low = 0
-        high = 100 / 69.84
+        high = 100 / (69.84*60)
         self.flow_cbf = torch.nn.Parameter(torch.FloatTensor(*self.shape_in, 1).uniform_(low, high))
         self.NN = MLP(
             self.shape_in,
@@ -58,18 +58,21 @@ class PPINN(nn.Module):
 
     def forward(self, t):
         length = t.shape[0]
+        t = t.unsqueeze(-1)
         # Get ODE params
         params = self.get_ode_params()
-        t = t.repeat(*self.shape_in, 1).unsqueeze(-1)
+        # t = t.repeat(*self.shape_in, 1).unsqueeze(-1)
         # Get NN output
         c_aif, c_tissue = self.NN(t)
+
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
         # Get NN output at MTT time
         # t.requires_grad = False
 
-        mtt_s = self.mtts.repeat(1,1,1,1,length).unsqueeze(-1)
-        c_aif_b, _ = self.NN(t-mtt_s/self.std_t)
+        # mtt_s = self.mtts.repeat(1,1,1,1,length).unsqueeze(-1)
+        c_aif_b, _ = self.NN(t-24/self.std_t)
+
         # Define residual
         residual = c_tissue_dt - params * (c_aif - c_aif_b)
         # print(residual)
@@ -166,10 +169,11 @@ class PPINN(nn.Module):
             # compute data loss
             output = self.forward(batch_time)
             tissue = output[2]
-            print(tissue.shape)
-            for i in range(10):
-                plt.plot(tissue[0,0,i,0,:].cpu().detach().numpy())
-            plt.show()
+            # if epoch == 1 or epoch % 100 == 0:
+            #     for i in range(30):
+            #         plt.plot(tissue[0,0,i,0,:].cpu().detach().numpy())
+            #     plt.show()
+            #     print(batch_curves.shape, tissue.shape)
             loss += self.lw_data * self.__loss_data(batch_aif, batch_curves, output)
         if self.lw_res:
             # compute residual loss
@@ -240,13 +244,13 @@ class PPINN(nn.Module):
 
     def plot_params(self, i, j, perfusion_values, epoch):
         params = self.get_cbf(seconds=False)
-        # print(self.get_ode_params())
+        print(params)
+        # torch.max(perfusion_values[i, j, :, :, par])
         for par in range(params.shape[-1]):
-            print(params[i,j,:,:,par])
             fig, ax = plt.subplots(2, 1)
             ax[0].set_title('Epoch: {}'.format(epoch))
-            im = ax[0].imshow(params[i,j,:,:,par].cpu().detach().numpy(), vmin=torch.min(perfusion_values[i,j,:,:,par]), vmax=torch.max(perfusion_values[i,j,:,:,par]))
-            im = ax[1].imshow(perfusion_values[i,j,:,:,par].cpu().detach().numpy(), vmin=torch.min(perfusion_values[i,j,:,:,par]), vmax=torch.max(perfusion_values[i,j,:,:,par]))
+            im = ax[0].imshow(params[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=200)
+            im = ax[1].imshow(perfusion_values[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=200)
             for x in ax:
                 x.set_axis_off()
             plt.tight_layout()
