@@ -6,15 +6,16 @@ from torchsummary import summary
 class MLP(nn.Module):
     def __init__(self,
                  shape_in,
+                 aif,
                  n_layers,
                  n_units,
                  n_inputs=1,
-                 neurons_out=2,
+                 neurons_out=1,
                  bn=False,
                  act='tanh'):
         super(MLP, self).__init__()
         self.shape_in = shape_in
-        print(shape_in)
+        self.aif = aif
         self.n_layers = n_layers
         self.n_units = n_units
         self.n_inputs = n_inputs
@@ -45,24 +46,24 @@ class MLP(nn.Module):
                                         h=self.shape_in[2],
                                         w=self.shape_in[3]))
         layers.append(self.act)
-        layers.append(nn.Linear(self.n_units, self.neurons_out * self.shape_in[0] * self.shape_in[1] * self.shape_in[2] * self.shape_in[3]))
-        layers.append(Rearrange('b (curves type cbv h w) -> type cbv h w b curves',
-                                curves=2,
-                                type=self.shape_in[0],
-                                cbv=self.shape_in[1],
-                                h=self.shape_in[2],
-                                w=self.shape_in[3]))
+        if not self.aif:
+            layers.append(nn.Linear(self.n_units,
+                                self.neurons_out * self.shape_in[0] * self.shape_in[1] * self.shape_in[2] * self.shape_in[3]))
+            layers.append(Rearrange('b (curves type cbv h w) -> type cbv h w b curves',
+                                    curves=1,
+                                    type=self.shape_in[0],
+                                    cbv=self.shape_in[1],
+                                    h=self.shape_in[2],
+                                    w=self.shape_in[3]))
+        else:
+            layers.append(nn.Linear(self.n_units,
+                                    self.neurons_out))
         return nn.Sequential(*layers)
 
     def forward(self, x):
         # x = x.repeat(*self.shape_in, 1).unsqueeze(-1)
         x = self.net(x)
+        # if not self.aif:
+        #     x = x.view(*self.shape_in, -1)
         # return c_aif and c_tissue
-        return x[..., 0], x[..., 1]
-
-if __name__ == "__main__":
-    model = MLP(np.ones((24, 24)),2,10,1)
-    model(torch.rand(1))
-
-    print(model)
-
+        return x[...,0]

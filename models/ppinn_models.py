@@ -29,9 +29,9 @@ class PPINN(nn.Module):
         self.var_list = None
         self.shape_in = shape_in
         self.std_t = std_t
-        self.neurons_out = 2
+        self.neurons_out = 1
         self.mtts =  perfusion_values[..., 2] * 60
-        self.mtts = self.mtts.unsqueeze(-1)
+        self.mtts = self.mtts.view(*self.mtts.shape, 1,1 )
         self.mtts = self.mtts.to(self.device)
         # initialize flow parameters
         # self.hemo_scaling = torch.as_tensor(((100*0.55)/(1.05*0.75))).to(self.device)
@@ -39,16 +39,26 @@ class PPINN(nn.Module):
         low = 0
         high = 100 / (69.84*60)
         self.flow_cbf = torch.nn.Parameter(torch.FloatTensor(*self.shape_in, 1).uniform_(low, high))
-        self.NN = MLP(
+        self.NN_tissue = MLP(
             self.shape_in,
+            False,
             n_layers,
             n_units,
             n_inputs=n_inputs,
-            neurons_out=self.neurons_out,
+            neurons_out=1,
             bn=bn,
             act='tanh'
         )
-
+        self.NN_aif = MLP(
+            self.shape_in,
+            True,
+            n_layers,
+            n_units,
+            n_inputs=n_inputs,
+            neurons_out=1,
+            bn=bn,
+            act='tanh'
+        )
         self.current_iteration = 0
         self.set_lr(lr)
         self.set_loss_weights(loss_weights)
@@ -58,21 +68,21 @@ class PPINN(nn.Module):
 
     def forward(self, t):
         length = t.shape[0]
-        t = t.unsqueeze(-1)
         # Get ODE params
         params = self.get_ode_params()
-        # t = t.repeat(*self.shape_in, 1).unsqueeze(-1)
-        # Get NN output
-        c_aif, c_tissue = self.NN(t)
-
+        t = t.unsqueeze(-1)
+        # Get NN output: a tissue curve for each voxel
+        c_tissue = self.NN_tissue(t)
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
+        # Get AIF NN output:
+        t = t.view(1,1,1,1,length, 1)
+        t = t.expand(*self.shape_in, length, 1)
+        c_aif = self.NN_aif(t)
         # Get NN output at MTT time
         # t.requires_grad = False
-
-        # mtt_s = self.mtts.repeat(1,1,1,1,length).unsqueeze(-1)
-        c_aif_b, _ = self.NN(t-24/self.std_t)
-
+        mtt_s = self.mtts.expand(*self.shape_in,length,1)
+        c_aif_b = self.NN_aif(t-mtt_s/self.std_t)
         # Define residual
         residual = c_tissue_dt - params * (c_aif - c_aif_b)
         # print(residual)
