@@ -63,7 +63,7 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                  'vof': vof_data,
                  'time': time,
                  'curves': perfusion_data[2:,4:,:,:,:],
-                 'perfusion_values': perfusion_values[2:, 4:, :,:,:]}
+                 'perfusion_values': perfusion_values[2:, 4:,:,:,:]}
 
     data_dict = normalize_data(data_dict)
     data_dict = get_coll_points(data_dict)

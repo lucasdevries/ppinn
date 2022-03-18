@@ -15,7 +15,7 @@ def train():
                                n_units=16,
                                lr=1e-3,
                                perfusion_values=data_dict['perfusion_values'],
-                               loss_weights=(1, 1, 0),
+                               loss_weights=(1, 10, 0),
                                bn=False,
                                trainable_params='all',
                                n_inputs=1,
