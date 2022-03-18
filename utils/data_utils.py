@@ -62,8 +62,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     data_dict = {'aif': aif_data,
                  'vof': vof_data,
                  'time': time,
-                 'curves': perfusion_data[2:,4:,0:32,-32:,:],
-                 'perfusion_values': perfusion_values[2:, 4:, :32,-32:,:]}
+                 'curves': perfusion_data[2:,4:,:,:,:],
+                 'perfusion_values': perfusion_values[2:, 4:, :,:,:]}
 
     data_dict = normalize_data(data_dict)
     data_dict = get_coll_points(data_dict)
@@ -102,7 +102,7 @@ def get_tensors(data_dict):
 def apply_gaussian_filter(type, array, sd):
     assert len(array.shape) == 4
     if type == 'spatio-temporal':
-        return gaussian_filter(array, sigma=(0, sd, sd, sd), mode='nearest')
+        return gaussian_filter(array, sigma=(0, sd/2, sd, sd), mode='nearest')
     elif type == 'spatial':
         return gaussian_filter(array, sigma=(0, 0, sd, sd), mode='nearest')
     else:

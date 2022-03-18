@@ -30,15 +30,29 @@ class PPINN(nn.Module):
         self.shape_in = shape_in
         self.std_t = std_t
         self.neurons_out = 1
-        self.mtts =  perfusion_values[..., 2] * 60
+        self.mtts = perfusion_values[..., 2] * 60
+        # plt.imshow(self.mtts[0,0,].numpy())
+        # plt.show()
+
         self.mtts = self.mtts.view(*self.mtts.shape, 1,1 )
         self.mtts = self.mtts.to(self.device)
+
+        self.delays = perfusion_values[..., 1]
+        self.delays = self.delays.view(*self.delays.shape, 1,1 )
+        self.delays = self.delays.to(self.device)
+        # plt.imshow(self.delays[0,0,...,0,0].cpu().numpy())
+        # plt.show()
         # initialize flow parameters
         # self.hemo_scaling = torch.as_tensor(((100*0.55)/(1.05*0.75))).to(self.device)
         # initialize flow parameters
         low = 0
         high = 100 / (69.84*60)
-        self.flow_cbf = torch.nn.Parameter(torch.FloatTensor(*self.shape_in, 1).uniform_(low, high))
+        # self.flow_cbf = torch.nn.Parameter(torch.FloatTensor(*self.shape_in, 1).uniform_(low, high))
+        flow = torch.rand(*self.shape_in, 1)*high
+        # plt.imshow(torch.nn.Parameter(flow[0,0,:,:,0]), cmap='jet')
+        # plt.show()
+        self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1)*high)
+
         self.NN_tissue = MLP(
             self.shape_in,
             False,
@@ -78,11 +92,13 @@ class PPINN(nn.Module):
         # Get AIF NN output:
         t = t.view(1,1,1,1,length, 1)
         t = t.expand(*self.shape_in, length, 1)
-        c_aif = self.NN_aif(t)
+        c_aif = self.NN_aif(t-self.delays/self.std_t)
         # Get NN output at MTT time
         # t.requires_grad = False
         mtt_s = self.mtts.expand(*self.shape_in,length,1)
-        c_aif_b = self.NN_aif(t-mtt_s/self.std_t)
+        delay_s = self.delays.expand(*self.shape_in,length,1)
+
+        c_aif_b = self.NN_aif(t-delay_s/self.std_t-mtt_s/self.std_t)
         # Define residual
         residual = c_tissue_dt - params * (c_aif - c_aif_b)
         # print(residual)
@@ -151,7 +167,7 @@ class PPINN(nn.Module):
                               batch_curves,
                               batch_boundary,
                               batch_collopoints, ep)
-            if ep%300 == 0:
+            if ep%500 == 0:
                 # print(self.get_cbf(seconds=False))
                 self.plot_params(0,0,gt,ep)
 
@@ -254,15 +270,22 @@ class PPINN(nn.Module):
 
     def plot_params(self, i, j, perfusion_values, epoch):
         params = self.get_cbf(seconds=False)
-        print(params)
-        # torch.max(perfusion_values[i, j, :, :, par])
+        # print(params)
+        # print(perfusion_values[i, j, :, :, 0])
+        # plt.imshow(perfusion_values[i,j,:,:,0].cpu().detach().numpy())
+        # plt.show()
+        # plt.imshow(perfusion_values[i,j,:,:,1].cpu().detach().numpy())
+        # plt.show()
+        # plt.imshow(perfusion_values[i,j,:,:,2].cpu().detach().numpy())
+        # plt.show()
         for par in range(params.shape[-1]):
-            fig, ax = plt.subplots(2, 1)
+            fig, ax = plt.subplots(1, 2)
             ax[0].set_title('Epoch: {}'.format(epoch))
-            im = ax[0].imshow(params[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=200)
-            im = ax[1].imshow(perfusion_values[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=200)
+            im = ax[0].imshow(params[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=200, cmap='jet')
+            im = ax[1].imshow(perfusion_values[i,j,:,:,par].cpu().detach().numpy(), vmin=0, vmax=200, cmap='jet')
+            fig.colorbar(im, ax=ax.ravel().tolist(),location="bottom")
             for x in ax:
                 x.set_axis_off()
-            plt.tight_layout()
-            fig.colorbar(im, ax=ax.ravel().tolist(),location="bottom")
+            # plt.tight_layout()
+
             plt.show()
