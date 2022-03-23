@@ -4,9 +4,9 @@ from models.ppinn_models import PPINN
 from torch.utils.data import DataLoader
 
 def train():
-    data_dict = data_utils.load_data(gaussian_filter_type='spatio-temporal', sd=2.5)
+    data_dict = data_utils.load_data(gaussian_filter_type='spatial', sd=2.5)
 
-    for i in range(0,32):
+    for i in range(0,224):
         plt.plot(data_dict['curves'][0,0,i,-10,:].numpy())
     # plt.ylim(0.05, 0.3)
     plt.show()

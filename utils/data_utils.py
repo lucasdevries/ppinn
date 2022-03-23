@@ -1,9 +1,9 @@
 import numpy as np
 import SimpleITK as sitk
 from einops.einops import rearrange, repeat
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, convolve
 import torch
-
+import matplotlib.pyplot as plt
 def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     print("Reading Dicom directory:", folder)
     reader = sitk.ImageSeriesReader()
@@ -13,6 +13,10 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     image_data = sitk.GetArrayFromImage(image)
     # values: AIF/VOF, Exp R(t) for CBV 1-5, Lin R(t) for CBV 1-5, Box R(t) for CBV 1-5,
     image_data = rearrange(image_data, '(t values) h w -> values t h w', t=30)
+    # apply kernel k = [0.25, 0.5, 0.25] to all curves
+    k = np.array([0.25, 0.5, 0.25])
+    k = k.reshape(1,3,1,1)
+    image_data = convolve(image_data, k, mode='nearest')
 
     vof_location = (410,247,16) # start, start, size
     vof_data = image_data[0,
@@ -20,8 +24,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                vof_location[0]:vof_location[0]+vof_location[2],
                vof_location[1]:vof_location[1]+vof_location[2]]
 
-    if gaussian_filter_type:
-        vof_data = apply_gaussian_filter(gaussian_filter_type, vof_data, sd=sd)
+    # if gaussian_filter_type:
+    #     vof_data = apply_gaussian_filter(gaussian_filter_type, vof_data, sd=sd)
 
     vof_data = np.mean(vof_data, axis=(1,2))
 
@@ -30,9 +34,9 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                :,
                aif_location[0]:aif_location[0]+aif_location[2],
                aif_location[1]:aif_location[1]+aif_location[2]]
-
-    if gaussian_filter_type:
-        aif_data = apply_gaussian_filter(gaussian_filter_type, aif_data, sd=sd)
+    #
+    # if gaussian_filter_type:
+    #     aif_data = apply_gaussian_filter(gaussian_filter_type, aif_data, sd=sd)
 
     aif_data = np.mean(aif_data, axis=(1,2))
 
@@ -47,7 +51,6 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     perfusion_data = perfusion_data.astype(np.float32)
 
     if gaussian_filter_type:
-        perfusion_data = perfusion_data
         perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data, sd=sd)
 
     # exp_data data has shape 15 (curve simulation type *CBV) x 30 (Time) x 224 (7 x delay_step) x 224 (7 x MTT step)

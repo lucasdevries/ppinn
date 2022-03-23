@@ -47,6 +47,7 @@ class PPINN(nn.Module):
         # if using set delay values
         self.delays = perfusion_values[..., 1]
         self.delays = self.delays.view(*self.delays.shape, 1,1 )
+        # self.delays = torch.zeros_like(self.delays)
         self.delays = self.delays.to(self.device)
         # initialize flow parameters
         low = 0
@@ -56,7 +57,7 @@ class PPINN(nn.Module):
         # plt.show()
         self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1)*high)
         self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-        # self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+        self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
 
         nn.init.uniform_(self.flow_cbf, low, high)
         nn.init.uniform_(self.flow_mtt)
@@ -126,6 +127,34 @@ class PPINN(nn.Module):
         # residual = c_tissue_dt - self.truecbf * (c_aif - c_aif_b)
 
         return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
+    def forward_allfree(self, t):
+        length = t.shape[0]
+        # Get ODE params
+        params = self.get_ode_params()
+        t = t.unsqueeze(-1)
+        # Get NN output: a tissue curve for each voxel
+        c_tissue = self.NN_tissue(t)
+        # Get time-derivative of tissue curve
+        c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
+
+
+        # Get AIF NN output:
+        t = t.view(1,1,1,1,length, 1)
+        t = t.expand(*self.shape_in, length, 1)
+
+
+        # Get NN output at MTT time
+        t = t.detach()
+
+        t.requires_grad = False
+
+        c_aif = self.NN_aif(t-3*params[2]/self.std_t)
+
+        input = t - 3*params[2]/self.std_t - 24*params[1]/self.std_t
+        c_aif_b = self.NN_aif(input)
+        # Define residual
+        residual = c_tissue_dt - params[0] * (c_aif - c_aif_b)
+        return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
 
     def set_loss_weights(self, loss_weights):
         loss_weights = torch.tensor(loss_weights)
@@ -147,7 +176,7 @@ class PPINN(nn.Module):
             raise NotImplementedError('Get to work and implement it!')
 
     def get_ode_params(self):
-        return [self.flow_cbf, self.flow_mtt, None]
+        return [self.flow_cbf, self.flow_mtt, self.flow_t_delay]
 
     def get_mtt(self, seconds=True):
         _, mtt_par, _ = self.get_ode_params()
@@ -162,17 +191,17 @@ class PPINN(nn.Module):
         constant = torch.as_tensor(constant).to(self.device)
         f_s, _, _ = self.get_ode_params()
         if seconds:
-            return constant * f_s /2
+            return constant * f_s
         else:
-            return constant * f_s * 60 /2
+            return constant * f_s * 60
 
     def get_delay(self, seconds=True):
-        # _, _, delay = self.get_ode_params()
-        # if seconds:
-        #     return 3*delay.squeeze(-1)
-        # else:
-        #     return 3*delay.squeeze(-1)/60
-        return self.delays.squeeze(-1).squeeze(-1)
+        _, _, delay = self.get_ode_params()
+        if seconds:
+            return 3*delay.squeeze(-1)
+        else:
+            return 3*delay.squeeze(-1)/60
+        # return self.delays.squeeze(-1).squeeze(-1)
 
 
     def define_interpolator(self, time, aif, mode='quadratic'):
@@ -235,8 +264,9 @@ class PPINN(nn.Module):
             loss += self.lw_data * self.__loss_data(batch_aif, batch_curves, output)
         if self.lw_res:
             # compute residual loss
-            output = self.forward(batch_collopoints)
+            output = self.forward_allfree(batch_collopoints)
             loss += self.lw_res * self.__loss_residual(output)
+
         if self.lw_bc:
             # compute bc loss
             output = self.forward(batch_boundary)
@@ -319,24 +349,26 @@ class PPINN(nn.Module):
 
         i, j = 0, 0
 
-        # fig, ax = plt.subplots(1, 3)
-        # ax[0].hist(cbf[i,j].flatten(), bins=100)
-        # ax[0].set_title('cbf')
-        # ax[1].hist(mtt[i,j].flatten(), bins=100)
-        # ax[1].set_title('mtt')
-        # ax[2].hist(cbv[i,j].flatten(), bins=100)
-        # ax[2].set_title('cbv')
-        # plt.show()
         fig, ax = plt.subplots(1, 4)
-        ax[0].hist(cbf[i,j].flatten(), bins=100, range=(0,150))
+        ax[0].hist(cbf[i,j].flatten(), bins=100)
         ax[0].set_title('cbf')
-        ax[1].hist(mtt[i,j].flatten(), bins=100, range=(0,30))
+        ax[1].hist(mtt[i,j].flatten(), bins=100)
         ax[1].set_title('mtt')
-        ax[2].hist(cbv[i,j].flatten(), bins=100, range=(0,10))
+        ax[2].hist(cbv[i,j].flatten(), bins=100)
         ax[2].set_title('cbv')
         ax[3].hist(delay[i,j].flatten(), bins=100, range=(0,3))
         ax[3].set_title('delay')
         plt.show()
+        # fig, ax = plt.subplots(1, 4)
+        # ax[0].hist(cbf[i,j].flatten(), bins=100, range=(0,150))
+        # ax[0].set_title('cbf')
+        # ax[1].hist(mtt[i,j].flatten(), bins=100, range=(0,30))
+        # ax[1].set_title('mtt')
+        # ax[2].hist(cbv[i,j].flatten(), bins=100, range=(0,10))
+        # ax[2].set_title('cbv')
+        # ax[3].hist(delay[i,j].flatten(), bins=100, range=(0,3))
+        # ax[3].set_title('delay')
+        # plt.show()
 
         fig, ax = plt.subplots(2, 4)
 
