@@ -30,10 +30,21 @@ class PPINN(nn.Module):
         self.shape_in = shape_in
         self.std_t = std_t
         self.neurons_out = 1
+
+        # if using GT mtt and cbf
         # self.mtts = perfusion_values[..., 2] * 60
         # self.mtts = self.mtts.view(*self.mtts.shape, 1,1 )
         # self.mtts = self.mtts.to(self.device)
+        #
+        # self.truecbf = perfusion_values[..., -1]
+        # self.truecbf = self.truecbf.view(*self.truecbf.shape, 1)
+        # self.truecbf = self.truecbf.to(self.device)
 
+        # density = 1.05
+        # constant = (100/density) * 0.55 / 0.75
+        # self.truecbf = self.truecbf / constant
+
+        # if using set delay values
         self.delays = perfusion_values[..., 1]
         self.delays = self.delays.view(*self.delays.shape, 1,1 )
         self.delays = self.delays.to(self.device)
@@ -45,8 +56,10 @@ class PPINN(nn.Module):
         # plt.show()
         self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1)*high)
         self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+        # self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
 
-
+        nn.init.uniform_(self.flow_cbf, low, high)
+        nn.init.uniform_(self.flow_mtt)
         self.NN_tissue = MLP(
             self.shape_in,
             False,
@@ -79,29 +92,39 @@ class PPINN(nn.Module):
         # Get ODE params
         params = self.get_ode_params()
         t = t.unsqueeze(-1)
-
-        t2 = t.clone()
         # Get NN output: a tissue curve for each voxel
         c_tissue = self.NN_tissue(t)
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
+
+
         # Get AIF NN output:
         t = t.view(1,1,1,1,length, 1)
         t = t.expand(*self.shape_in, length, 1)
-        c_aif = self.NN_aif(t-self.delays/self.std_t)
+
+
         # Get NN output at MTT time
         t = t.detach()
-        # mtt_s = params[1].expand(*self.shape_in,1,1)
-
         delay_s = self.delays.expand(*self.shape_in,length,1)
         delay_s.requires_grad = False
-        t.requires_grad=False
-        input = t-delay_s/self.std_t-24*params[1]/self.std_t
+        t.requires_grad = False
+
+        c_aif = self.NN_aif(t-delay_s/self.std_t)
+
+        input = t - delay_s/self.std_t - 24*params[1]/self.std_t
         c_aif_b = self.NN_aif(input)
         # Define residual
         residual = c_tissue_dt - params[0] * (c_aif - c_aif_b)
+
+
+
         # print(residual)
-        # residual = None
+        # if using set cbf and mtt
+        # input = t - 3*params[2]/self.std_t - self.mtts/self.std_t
+        #
+        # c_aif_b = self.NN_aif(input)
+        # residual = c_tissue_dt - self.truecbf * (c_aif - c_aif_b)
+
         return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
 
     def set_loss_weights(self, loss_weights):
@@ -124,20 +147,33 @@ class PPINN(nn.Module):
             raise NotImplementedError('Get to work and implement it!')
 
     def get_ode_params(self):
-        return [self.flow_cbf, self.flow_mtt]
+        return [self.flow_cbf, self.flow_mtt, None]
 
-    def get_mtt(self):
-        return 24*self.flow_mtt
+    def get_mtt(self, seconds=True):
+        _, mtt_par, _ = self.get_ode_params()
+        if seconds:
+            return 24*mtt_par.squeeze(-1)
+        else:
+            return 24*mtt_par.squeeze(-1)/60
 
-    def get_cbf(self, seconds: object = True):
+    def get_cbf(self, seconds=True):
         density = 1.05
         constant = (100/density) * 0.55 / 0.75
         constant = torch.as_tensor(constant).to(self.device)
-        f_s, _ = self.get_ode_params()
+        f_s, _, _ = self.get_ode_params()
         if seconds:
-            return constant * f_s
+            return constant * f_s /2
         else:
-            return constant * f_s * 60
+            return constant * f_s * 60 /2
+
+    def get_delay(self, seconds=True):
+        # _, _, delay = self.get_ode_params()
+        # if seconds:
+        #     return 3*delay.squeeze(-1)
+        # else:
+        #     return 3*delay.squeeze(-1)/60
+        return self.delays.squeeze(-1).squeeze(-1)
+
 
     def define_interpolator(self, time, aif, mode='quadratic'):
         self.interpolator = interp1d(time, aif,
@@ -211,19 +247,11 @@ class PPINN(nn.Module):
 
         # optimizer
         loss.backward()
-        # print(self.get_ode_params()[1][0,0,:10,0,0,0].grad)
-        # print(self.get_mtt().grad[0,0,:2,0,0,0])
-        # for p in self.parameters():
-        #     p.grad *= C  # or whatever other operation
-
         # for name, param in self.named_parameters():
         #     if param.requires_grad:
-        #         if name == 'flow_mtt':
-        #             param.grad *= 100000000
-                # name, param.data
-        # print(self.get_mtt()[0, 0, :2, 0, 0, 0])
-        # print(self.get_ode_params()[0].grad[0, 0, :2, 0, 0])
-        # print(self.get_ode_params()[0][0, 0, :2, 0, 0])
+        #         if name == 'flow_t_delay':
+        #             param.grad *= 10000000
+
         self.optimizer.step()
         self.current_iteration += 1
 
@@ -273,29 +301,68 @@ class PPINN(nn.Module):
         return out
 
     def plot_params(self, i, j, perfusion_values, epoch):
-        cbf = self.get_cbf(seconds=False)
-        mtt = self.get_mtt()
+        cbf = self.get_cbf(seconds=False).squeeze(-1)
+        mtt = self.get_mtt(seconds=True).squeeze(-1)
+        mtt_min = self.get_mtt(seconds=False).squeeze(-1)
+        delay = self.get_delay(seconds=True).squeeze(-1)
 
-        # print(params)
-        # print(perfusion_values[i, j, :, :, 0])
-        # plt.imshow(perfusion_values[i,j,:,:,0].cpu().detach().numpy())
+        cbv = cbf * mtt_min
+
+        # print(torch.min(mtt),torch.min(cbf))
+        # 0:'cbv', 1:'delay', 2:'mtt_m', 3:'cbf'
+        gt_cbv = perfusion_values[..., 0]
+        gt_delay = perfusion_values[..., 1]
+        gt_mtt = perfusion_values[..., 2]*60
+        gt_cbf = perfusion_values[..., 3]
+
+        [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay] = [x.detach().cpu().numpy() for x in [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay]]
+
+        i, j = 0, 0
+
+        # fig, ax = plt.subplots(1, 3)
+        # ax[0].hist(cbf[i,j].flatten(), bins=100)
+        # ax[0].set_title('cbf')
+        # ax[1].hist(mtt[i,j].flatten(), bins=100)
+        # ax[1].set_title('mtt')
+        # ax[2].hist(cbv[i,j].flatten(), bins=100)
+        # ax[2].set_title('cbv')
         # plt.show()
-        # plt.imshow(perfusion_values[i,j,:,:,1].cpu().detach().numpy())
-        # plt.show()
-        # plt.imshow(perfusion_values[i,j,:,:,2].cpu().detach().numpy())
-        # plt.show()
-        fig, ax = plt.subplots(1, 3)
-        ax[2].set_title('Epoch: {}'.format(epoch))
-        ax[0].set_title('CBF')
-        ax[1].set_title('MTT')
-        im = ax[0].imshow(cbf[i,j,:,:,0].cpu().detach().numpy(), vmin=0, vmax=200, cmap='jet')
-        fig.colorbar(im, ax=ax[0],location="bottom")
-        im = ax[1].imshow(mtt[i,j,:,:,0,0].cpu().detach().numpy(), vmin=0, vmax=30, cmap='jet')
-        fig.colorbar(im, ax=ax[1],location="bottom")
-        im = ax[2].imshow(perfusion_values[i,j,:,:,0].cpu().detach().numpy(), vmin=0, vmax=200, cmap='jet')
-        fig.colorbar(im, ax=ax[2],location="bottom")
-        for x in ax:
+        fig, ax = plt.subplots(1, 4)
+        ax[0].hist(cbf[i,j].flatten(), bins=100, range=(0,150))
+        ax[0].set_title('cbf')
+        ax[1].hist(mtt[i,j].flatten(), bins=100, range=(0,30))
+        ax[1].set_title('mtt')
+        ax[2].hist(cbv[i,j].flatten(), bins=100, range=(0,10))
+        ax[2].set_title('cbv')
+        ax[3].hist(delay[i,j].flatten(), bins=100, range=(0,3))
+        ax[3].set_title('delay')
+        plt.show()
+
+        fig, ax = plt.subplots(2, 4)
+
+        ax[0,0].set_title('CBF (ml/100g/min)')
+        ax[0,0].imshow(cbf[i,j], vmin=0, vmax=150, cmap='jet')
+        im = ax[1,0].imshow(gt_cbf[i,j], vmin=0, vmax=150, cmap='jet')
+        fig.colorbar(im, ax=ax[1,0], location="bottom")
+
+        ax[0,1].set_title('MTT (s)')
+        ax[0,1].imshow(mtt[i,j], vmin=0, vmax=25, cmap='jet')
+        im = ax[1,1].imshow(gt_mtt[i,j], vmin=0, vmax=25, cmap='jet')
+        fig.colorbar(im, ax=ax[1,1], location="bottom")
+
+        ax[0,2].set_title('CBV (ml/100g)')
+        ax[0,2].imshow(cbv[i,j], vmin=0, vmax=10, cmap='jet')
+        im = ax[1,2].imshow(gt_cbv[i,j], vmin=0, vmax=10, cmap='jet')
+        fig.colorbar(im, ax=ax[1,2], location="bottom")
+
+        ax[0,3].set_title('Delay (s)')
+        im = ax[0,3].imshow(delay[i,j], vmin=0, vmax=3, cmap='jet')
+        im = ax[1,3].imshow(gt_delay[i,j], vmin=0, vmax=3, cmap='jet')
+
+        fig.colorbar(im, ax=ax[1,3], location="bottom")
+
+        for x in ax.flatten():
             x.set_axis_off()
-        # plt.tight_layout()
-
+        fig.suptitle('Parameter estimation epoch: {}'.format(epoch))
+        plt.tight_layout()
         plt.show()
