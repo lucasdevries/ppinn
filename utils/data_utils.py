@@ -13,6 +13,9 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     image_data = sitk.GetArrayFromImage(image)
     # values: AIF/VOF, Exp R(t) for CBV 1-5, Lin R(t) for CBV 1-5, Box R(t) for CBV 1-5,
     image_data = rearrange(image_data, '(t values) h w -> values t h w', t=30)
+    image_data = image_data.astype(np.float32)
+    if gaussian_filter_type:
+        image_data = apply_gaussian_filter(gaussian_filter_type, image_data, sd=sd)
     # apply kernel k = [0.25, 0.5, 0.25] to all curves
     k = np.array([0.25, 0.5, 0.25])
     k = k.reshape(1,3,1,1)
@@ -24,10 +27,6 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                vof_location[0]:vof_location[0]+vof_location[2],
                vof_location[1]:vof_location[1]+vof_location[2]]
 
-
-    # if gaussian_filter_type:
-    #     vof_data = apply_gaussian_filter(gaussian_filter_type, vof_data, sd=sd)
-
     vof_data = np.mean(vof_data, axis=(1,2))
 
     aif_location = (123,251,8) # start, start, size
@@ -36,12 +35,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                aif_location[0]:aif_location[0]+aif_location[2],
                aif_location[1]:aif_location[1]+aif_location[2]]
 
-    # if gaussian_filter_type:
-    #     aif_data = apply_gaussian_filter(gaussian_filter_type, aif_data, sd=sd)
-
     aif_data = np.mean(aif_data, axis=(1,2))
-    plt.plot(aif_data)
-    plt.show()
+
     simulated_data_size = 32 * 7
     scan_center = image_data.shape[-1]//2
     simulated_data_start = scan_center - simulated_data_size//2
@@ -52,9 +47,14 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                      simulated_data_start:simulated_data_end]
     perfusion_data = perfusion_data.astype(np.float32)
 
-    if gaussian_filter_type:
-        perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data, sd=sd)
-
+    # if gaussian_filter_type:
+    #     perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data, sd=sd)
+    # plt.plot(perfusion_data[14, :,256-simulated_data_start, 256-simulated_data_start])
+    # plt.show()
+    # if gaussian_filter_type:
+    #     perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data, sd=sd)
+    # plt.plot(perfusion_data[14, :, 256-simulated_data_start, 256-simulated_data_start])
+    # plt.show()
     # exp_data data has shape 15 (curve simulation type *CBV) x 30 (Time) x 224 (7 x delay_step) x 224 (7 x MTT step)
 
     perfusion_values = np.empty([5, 7, 7, 4])
@@ -79,7 +79,6 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                  'time': time,
                  'curves': perfusion_data[2:, 4:, :, :, :],
                  'perfusion_values': perfusion_values[2:, 4:, :, :, :]}
-
     data_dict = normalize_data(data_dict)
     data_dict = get_coll_points(data_dict)
     data_dict = get_tensors(data_dict)
