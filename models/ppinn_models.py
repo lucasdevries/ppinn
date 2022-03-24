@@ -58,6 +58,9 @@ class PPINN(nn.Module):
         self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1)*high)
         self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
         self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+        # self.flow_t_delay = torch.rand(*self.shape_in, 1, 1)
+        # self.flow_t_delay = torch.rand(*self.shape_in, 1, 1)
+
 
         nn.init.uniform_(self.flow_cbf, low, high)
         nn.init.uniform_(self.flow_mtt)
@@ -127,7 +130,7 @@ class PPINN(nn.Module):
         # residual = c_tissue_dt - self.truecbf * (c_aif - c_aif_b)
 
         return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
-    def forward_allfree(self, t):
+    def forward_allfree(self, t, epoch):
         length = t.shape[0]
         # Get ODE params
         params = self.get_ode_params()
@@ -137,7 +140,11 @@ class PPINN(nn.Module):
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
 
-
+        find_max_batch = torch.arange(torch.min(t).item(), torch.max(t).item(), step=0.01).unsqueeze(-1).to(self.device)
+        aif_estimation = self.NN_aif(find_max_batch)
+        if epoch % 100 == 0:
+            plt.plot(aif_estimation.detach().cpu().numpy())
+            plt.show()
         # Get AIF NN output:
         t = t.view(1,1,1,1,length, 1)
         t = t.expand(*self.shape_in, length, 1)
@@ -155,7 +162,54 @@ class PPINN(nn.Module):
         # Define residual
         residual = c_tissue_dt - params[0] * (c_aif - c_aif_b)
         return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
+    def forward_calculate_delay(self, t, epoch):
+        length = t.shape[0]
+        t = t.unsqueeze(-1)
+        # Get NN output: a tissue curve for each voxel
+        c_tissue = self.NN_tissue(t)
+        # Get time-derivative of tissue curve
+        c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
 
+        find_max_batch = torch.arange(torch.min(t).item(), torch.max(t).item(), step=0.05).unsqueeze(-1).to(self.device)
+        # get maximum time of tac curve
+        tac_estimation = self.NN_tissue(find_max_batch)
+        largest_tac = find_max_batch[torch.topk(tac_estimation, k=1, dim=-1).indices]
+        # get maximum time of aif curve
+        aif_estimation = self.NN_aif(find_max_batch)
+        largest_aif = find_max_batch[torch.topk(aif_estimation, k=1, dim=-1).indices]
+        # largest_aif = largest_aif.expand(*self.shape_in, 1)
+
+        if epoch % 1000 == 0:
+            for i in range(224):
+                plt.plot(find_max_batch.detach().cpu().numpy(),tac_estimation.cpu().detach().numpy()[0, 0, i, 0])
+            plt.show()
+            plt.plot(find_max_batch.detach().cpu().numpy(), aif_estimation.detach().cpu().numpy())
+            plt.scatter(largest_aif.detach().cpu().numpy(), 1)
+            for i in range(224):
+                plt.scatter(largest_tac[0,0,i,0,0].detach().cpu().numpy(), 0.5)
+            plt.show()
+            print('stpo')
+        # Get AIF NN output:
+        t = t.view(1,1,1,1,length, 1)
+        t = t.expand(*self.shape_in, length, 1)
+
+        delay_s = self.delays.expand(*self.shape_in,length,1)
+        delay_s.requires_grad = False
+
+        # self.flow_t_delay = delay_time.unsqueeze(-1).expand(*self.shape_in, length, 1)
+        # Get NN output at MTT time
+        t = t.detach()
+        t.requires_grad = False
+
+        # Get ODE params
+        params = self.get_ode_params()
+        c_aif = self.NN_aif(t-delay_s/self.std_t)
+
+        input = t - delay_s/self.std_t - 24*params[1]/self.std_t
+        c_aif_b = self.NN_aif(input)
+        # Define residual
+        residual = c_tissue_dt - params[0] * (c_aif - c_aif_b)
+        return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
     def set_loss_weights(self, loss_weights):
         loss_weights = torch.tensor(loss_weights)
         self.lw_data, self.lw_res, self.lw_bc = loss_weights
@@ -196,12 +250,13 @@ class PPINN(nn.Module):
             return constant * f_s * 60
 
     def get_delay(self, seconds=True):
-        _, _, delay = self.get_ode_params()
-        if seconds:
-            return 3*delay.squeeze(-1)
-        else:
-            return 3*delay.squeeze(-1)/60
+        # _, _, delay = self.get_ode_params()
+        # if seconds:
+        #     return 3*delay.squeeze(-1)
+        # else:
+        #     return 3*delay.squeeze(-1)/60
         # return self.delays.squeeze(-1).squeeze(-1)
+        return self.flow_t_delay.squeeze(-1)[..., 0] * self.std_t
 
 
     def define_interpolator(self, time, aif, mode='quadratic'):
@@ -234,9 +289,9 @@ class PPINN(nn.Module):
                               batch_curves,
                               batch_boundary,
                               batch_collopoints, ep)
-            if ep%500 == 0:
-                # print(self.get_cbf(seconds=False))
-                self.plot_params(0,0,gt,ep)
+            # if ep%100 == 0:
+            #     # print(self.get_cbf(seconds=False))
+            #     self.plot_params(0,0,gt,ep)
 
     def optimize(self,
                  batch_time,
@@ -260,11 +315,11 @@ class PPINN(nn.Module):
 
         if self.lw_data:
             # compute data loss
-            output = self.forward(batch_time)
+            output = self.forward_calculate_delay(batch_time, epoch)
             loss += self.lw_data * self.__loss_data(batch_aif, batch_curves, output)
         if self.lw_res:
             # compute residual loss
-            output = self.forward_allfree(batch_collopoints)
+            output = self.forward_calculate_delay(batch_collopoints, epoch)
             loss += self.lw_res * self.__loss_residual(output)
 
         if self.lw_bc:

@@ -24,6 +24,7 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                vof_location[0]:vof_location[0]+vof_location[2],
                vof_location[1]:vof_location[1]+vof_location[2]]
 
+
     # if gaussian_filter_type:
     #     vof_data = apply_gaussian_filter(gaussian_filter_type, vof_data, sd=sd)
 
@@ -34,12 +35,13 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                :,
                aif_location[0]:aif_location[0]+aif_location[2],
                aif_location[1]:aif_location[1]+aif_location[2]]
-    #
+
     # if gaussian_filter_type:
     #     aif_data = apply_gaussian_filter(gaussian_filter_type, aif_data, sd=sd)
 
     aif_data = np.mean(aif_data, axis=(1,2))
-
+    plt.plot(aif_data)
+    plt.show()
     simulated_data_size = 32 * 7
     scan_center = image_data.shape[-1]//2
     simulated_data_start = scan_center - simulated_data_size//2
@@ -75,8 +77,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     data_dict = {'aif': aif_data,
                  'vof': vof_data,
                  'time': time,
-                 'curves': perfusion_data[2:, 4:, :, :, :],
-                 'perfusion_values': perfusion_values[2:, 4:, :, :, :]}
+                 'curves': perfusion_data[2:, 4:, :, -32:, :],
+                 'perfusion_values': perfusion_values[2:, 4:, :, -32:, :]}
 
     data_dict = normalize_data(data_dict)
     data_dict = get_coll_points(data_dict)

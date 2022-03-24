@@ -7,7 +7,7 @@ def train():
     data_dict = data_utils.load_data(gaussian_filter_type='spatial', sd=2.5)
 
     for i in range(0,224):
-        plt.plot(data_dict['curves'][0,0,i,-10,:].numpy())
+        plt.plot(data_dict['time'], data_dict['curves'][0,0,i,0,:].numpy())
     # plt.ylim(0.05, 0.3)
     plt.show()
     shape_in = data_dict['perfusion_values'].shape[:-1]  # (3, 5, 224, 224)
@@ -22,7 +22,7 @@ def train():
                                n_inputs=1,
                                std_t=data_dict['std_t'])
 
-    ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch='Start')
+    # ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch='Start')
     ppinn.fit(data_dict['time'],
               data_dict['aif'],
               data_dict['curves'],
