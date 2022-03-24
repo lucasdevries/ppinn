@@ -20,7 +20,8 @@ class PPINN(nn.Module):
                  bn=False,
                  trainable_params='all',
                  n_inputs=1,
-                 std_t=1):
+                 std_t=1,
+                 delay_as_parameter=False):
         super(PPINN, self).__init__()
         self.device = 'cuda'
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
@@ -32,10 +33,10 @@ class PPINN(nn.Module):
         self.neurons_out = 1
 
         # if using GT mtt and cbf
-        # self.mtts = perfusion_values[..., 2] * 60
-        # self.mtts = self.mtts.view(*self.mtts.shape, 1,1 )
-        # self.mtts = self.mtts.to(self.device)
-        #
+        self.mtts = perfusion_values[..., 2] * 60
+        self.mtts = self.mtts.view(*self.mtts.shape, 1,1 )
+        self.mtts = self.mtts.to(self.device)
+
         # self.truecbf = perfusion_values[..., -1]
         # self.truecbf = self.truecbf.view(*self.truecbf.shape, 1)
         # self.truecbf = self.truecbf.to(self.device)
@@ -57,13 +58,16 @@ class PPINN(nn.Module):
         # plt.show()
         self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1)*high)
         self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-        self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+        if delay_as_parameter:
+            self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+        else:
+            self.flow_t_delay = torch.rand(*self.shape_in, 1, 1).to(self.device)
         # self.flow_t_delay = torch.rand(*self.shape_in, 1, 1)
         # self.flow_t_delay = torch.rand(*self.shape_in, 1, 1)
 
-
-        nn.init.uniform_(self.flow_cbf, low, high)
-        nn.init.uniform_(self.flow_mtt)
+        #
+        # nn.init.uniform_(self.flow_cbf, low, high)
+        # nn.init.uniform_(self.flow_mtt)
         self.NN_tissue = MLP(
             self.shape_in,
             False,
@@ -90,6 +94,21 @@ class PPINN(nn.Module):
         self.set_trainable_params(trainable_params)
         self.set_device(self.device)
         self.float()
+
+    def forward_NNs(self, t, epoch):
+        t = t.unsqueeze(-1)
+        # Get NN output: a tissue curve for each voxel
+        c_tissue = self.NN_tissue(t)
+        c_aif = self.NN_aif(t)
+
+        return c_tissue, c_aif
+    def forward_complete(self, t, epoch):
+        t = t.unsqueeze(-1)
+        # Get NN output: a tissue curve for each voxel
+        c_tissue = self.NN_tissue(t)
+        # Get time-derivative of tissue curve
+        c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
+        # Find AIF and TAC maxima
 
     def forward(self, t):
         length = t.shape[0]
@@ -119,15 +138,6 @@ class PPINN(nn.Module):
         c_aif_b = self.NN_aif(input)
         # Define residual
         residual = c_tissue_dt - params[0] * (c_aif - c_aif_b)
-
-
-
-        # print(residual)
-        # if using set cbf and mtt
-        # input = t - 3*params[2]/self.std_t - self.mtts/self.std_t
-        #
-        # c_aif_b = self.NN_aif(input)
-        # residual = c_tissue_dt - self.truecbf * (c_aif - c_aif_b)
 
         return c_aif, c_aif_b, c_tissue, c_tissue_dt, params, residual
     def forward_allfree(self, t, epoch):
@@ -170,25 +180,30 @@ class PPINN(nn.Module):
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
 
-        find_max_batch = torch.arange(torch.min(t).item(), torch.max(t).item(), step=0.05).unsqueeze(-1).to(self.device)
+        find_max_batch = torch.arange(torch.min(t).item(), torch.max(t).item(), step=0.01).unsqueeze(-1).to(self.device)
         # get maximum time of tac curve
         tac_estimation = self.NN_tissue(find_max_batch)
-        largest_tac = find_max_batch[torch.topk(tac_estimation, k=1, dim=-1).indices]
+        largest_tac = find_max_batch[torch.topk(tac_estimation, k=1, dim=-1).indices].squeeze(-1)
         # get maximum time of aif curve
         aif_estimation = self.NN_aif(find_max_batch)
         largest_aif = find_max_batch[torch.topk(aif_estimation, k=1, dim=-1).indices]
-        # largest_aif = largest_aif.expand(*self.shape_in, 1)
+        largest_aif = largest_aif.expand(*self.shape_in, 1)
 
-        if epoch % 1000 == 0:
+        delay = largest_tac - largest_aif
+        delay *= self.std_t
+        delay -= self.mtts.squeeze(-1) / 2
+        if epoch % 500 == 0:
+            plt.imshow(delay[0,0,...,0].detach().cpu().numpy(), vmin=0, vmax=4)
+            plt.show()
             for i in range(224):
                 plt.plot(find_max_batch.detach().cpu().numpy(),tac_estimation.cpu().detach().numpy()[0, 0, i, 0])
             plt.show()
             plt.plot(find_max_batch.detach().cpu().numpy(), aif_estimation.detach().cpu().numpy())
+            largest_aif = find_max_batch[torch.topk(aif_estimation, k=1, dim=-1).indices]
             plt.scatter(largest_aif.detach().cpu().numpy(), 1)
             for i in range(224):
                 plt.scatter(largest_tac[0,0,i,0,0].detach().cpu().numpy(), 0.5)
             plt.show()
-            print('stpo')
         # Get AIF NN output:
         t = t.view(1,1,1,1,length, 1)
         t = t.expand(*self.shape_in, length, 1)
