@@ -67,6 +67,49 @@ class PPINN(nn.Module):
         self.set_device(self.device)
         self.float()
 
+    def get_delay_bolus_arrival_time(self,t):
+        find_max_batch = torch.arange(torch.min(t).item(), torch.max(t).item(), step=0.01).unsqueeze(-1).to(self.device)
+        aif_estimation = self.NN_aif(find_max_batch)
+        aif_dt = torch.gradient(aif_estimation)[0]
+        aif_dtdt = torch.gradient(aif_dt)[0]
+        top_2_maximums = torch.topk(aif_dtdt, k=2)
+        index_of_bolus_arrival = torch.min(top_2_maximums.indices).item()
+        plt.plot(aif_estimation.cpu().detach().numpy(), label='curve')
+        plt.plot(10 * aif_dt.cpu().detach().numpy(), label='first derivative')
+        plt.plot(10 * aif_dtdt.cpu().detach().numpy(), label='second derivative')
+        plt.scatter(index_of_bolus_arrival, aif_estimation.cpu().detach().numpy()[index_of_bolus_arrival],
+                    label='Bolus arrival', c='k')
+        plt.legend()
+        plt.show()
+        find_max_batch.requires_grad = True
+        tac_estimation = self.NN_tissue(find_max_batch)
+        tac_dt = self.__fwd_gradients(tac_estimation, find_max_batch)
+        for i in range(10):
+            for j in range(10):
+                plt.plot(tac_dt[0,0,i,j].detach().cpu().numpy())
+        plt.show()
+        tac_dtdt = self.__fwd_gradients(tac_dt, find_max_batch)
+        for i in range(10):
+            for j in range(10):
+                plt.plot(tac_dtdt[0,0,i,j].detach().cpu().numpy())
+        plt.show()
+        top_2_maximums_tac = torch.topk(tac_dtdt, k=2, dim=-1)
+        top_2_maximum_tac_indices = top_2_maximums_tac.indices.data
+        index_of_bolus_arrival_tac = torch.min(top_2_maximum_tac_indices, dim=-1).values
+
+        # curve_dt = torch.gradient(tac_estimation, dim=)[0]
+        curve_dtdt = torch.gradient(curve_dt)[0]
+        top_2_maximums = torch.topk(curve_dtdt, k=2)
+        index_of_bolus_arrival = torch.min(top_2_maximums.indices).item()
+
+        # plt.plot(curve.numpy(), label='curve')
+        # plt.plot(10 * curve_dt.numpy(), label='first derivative')
+        # plt.plot(10 * curve_dtdt.numpy(), label='second derivative')
+        plt.scatter(index_of_bolus_arrival, aif_estimation.numpy()[index_of_bolus_arrival], label='Bolus arrival', c='k')
+        # plt.legend()
+        # plt.show()
+
+        # return bolus_arrival_aif, bolus_arrival_tissue
     def get_delay_between_peaks(self,t):
         find_max_batch = torch.arange(torch.min(t).item(), torch.max(t).item(), step=0.01).unsqueeze(-1).to(self.device)
         # get maximum time of tac curve
@@ -86,6 +129,24 @@ class PPINN(nn.Module):
         # Get NN output: a tissue curve for each voxel
         c_tissue = self.NN_tissue(t)
         c_aif = self.NN_aif(t)
+        if epoch == 1999:
+            self.get_delay_bolus_arrival_time(t)
+            # plt.plot(c_aif.cpu().detach().numpy(), c='k')
+            # for i in range(16, 208, 32):
+            #     for j in range(16,208, 32):
+            #         plt.plot(c_tissue.cpu().detach().numpy()[0,0,i,j])
+            # plt.show()
+            # for i in range(16, 208, 32):
+            #     for j in range(16, 208, 32):
+            #         get_bolus_arrival_time(c_tissue.cpu().detach()[0, 0, i, j, :])
+            for i in range(0, 224):
+                for j in range(0, 2):
+                    get_bolus_arrival_time(c_tissue.cpu().detach()[0, 0, i, j, :])
+            plt.show()
+
+            get_bolus_arrival_time(c_aif.cpu().detach())
+            plt.show()
+            print('hoi')
         return c_aif, c_tissue
 
     def forward_complete(self, t, epoch):
@@ -370,3 +431,16 @@ class PPINN(nn.Module):
         fig.suptitle('Parameter estimation epoch: {}'.format(epoch))
         plt.tight_layout()
         plt.show()
+def get_bolus_arrival_time(curve):
+
+    curve_dt = torch.gradient(curve)[0]
+    curve_dtdt = torch.gradient(curve_dt)[0]
+    top_2_maximums = torch.topk(curve_dtdt, k=2)
+    index_of_bolus_arrival = torch.min(top_2_maximums.indices).item()
+
+    # plt.plot(curve.numpy(), label='curve')
+    # plt.plot(10 * curve_dt.numpy(), label='first derivative')
+    # plt.plot(10 * curve_dtdt.numpy(), label='second derivative')
+    plt.scatter(index_of_bolus_arrival, curve.numpy()[index_of_bolus_arrival], label='Bolus arrival', c='k')
+    # plt.legend()
+    # plt.show()
