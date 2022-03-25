@@ -5,7 +5,6 @@ from torch.utils.data import DataLoader
 
 def train():
     data_dict = data_utils.load_data(gaussian_filter_type='spatial', sd=2.5)
-
     for i in range(0,32):
         plt.plot(data_dict['time'], data_dict['curves'][0,0,5+i,-10,:].numpy())
     # plt.ylim(0.05, 0.3)

@@ -21,7 +21,7 @@ class PPINN(nn.Module):
                  trainable_params='all',
                  n_inputs=1,
                  std_t=1,
-                 delay_as_parameter=False):
+                 delay='calculated_peak'):
         super(PPINN, self).__init__()
         self.device = 'cuda'
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
@@ -31,37 +31,14 @@ class PPINN(nn.Module):
         self.shape_in = shape_in
         self.std_t = std_t
         self.neurons_out = 1
-
-        # if using GT mtt and cbf
-        # self.mtts = perfusion_values[..., 2] * 60
-        # self.mtts = self.mtts.view(*self.mtts.shape, 1,1 )
-        # self.mtts = self.mtts.to(self.device)
-
-        # self.truecbf = perfusion_values[..., -1]
-        # self.truecbf = self.truecbf.view(*self.truecbf.shape, 1)
-        # self.truecbf = self.truecbf.to(self.device)
-
-        # density = 1.05
-        # constant = (100/density) * 0.55 / 0.75
-        # self.truecbf = self.truecbf / constant
-
-        # if using set delay values
-        # self.delays = perfusion_values[..., 1]
-        # self.delays = self.delays.view(*self.delays.shape, 1,1 )
-        # # self.delays = torch.zeros_like(self.delays)
-        # self.delays = self.delays.to(self.device)
+        self.perfusion_values = perfusion_values
         # initialize flow parameters
         low = 0
         high = 100 / (69.84*60)
-        # self.flow_cbf = torch.nn.Parameter(torch.FloatTensor(*self.shape_in, 1).uniform_(low, high))
-        # plt.imshow(torch.nn.Parameter(flow[0,0,:,:,0]), cmap='jet')
-        # plt.show()
         self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1)*high)
         self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-        if delay_as_parameter:
-            self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-        else:
-            self.flow_t_delay = torch.rand(*self.shape_in, 1, 1).to(self.device)
+        self.delay_type = delay
+        self.set_delay_parameter()
 
         self.NN_tissue = MLP(
             self.shape_in,
@@ -102,7 +79,7 @@ class PPINN(nn.Module):
 
         delay = largest_tac - largest_aif
         delay *= self.std_t
-        return delay
+        return delay.unsqueeze(-1)
 
     def forward_NNs(self, t, epoch):
         t = t.unsqueeze(-1)
@@ -113,26 +90,36 @@ class PPINN(nn.Module):
 
     def forward_complete(self, t, epoch):
         t = t.unsqueeze(-1)
+        steps = t.shape[0]
         # Get NN output: a tissue curve for each voxel
         c_tissue = self.NN_tissue(t)
         c_aif = self.NN_aif(t)
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
-        # get delay between peaks, not yet corrected for mtt
-        delay = self.get_delay_between_peaks(t)
         # Get ODE params
         cbf, mtt = self.get_ode_params()
-        delay -= 24*mtt.squeeze(-1) / 2
-        self.flow_t_delay = delay.to(self.device)
 
-        length = t.shape[0]
+        if self.delay_type == 'learned':
+            delay = self.get_delay()
+        elif self.delay_type == 'calculated_peak':
+            # get delay between peaks, not yet corrected for mtt
+            delay = self.get_delay_between_peaks(t)
+            delay -= 24 * mtt / 2
+            self.flow_t_delay = delay.to(self.device) / 3
+            delay = self.get_delay()
+        elif self.delay_type == 'fixed':
+            delay = self.get_delay()
+            delay.requires_grad = False
+        else:
+            raise NotImplementedError('Delay type not implemented...')
+
         # Get AIF NN output:
-        t = t.view(1,1,1,1,length, 1)
-        t = t.expand(*self.shape_in, length, 1)
+        t = t.view(1,1,1,1,steps, 1)
+        t = t.expand(*self.shape_in, steps, 1)
         t = t.detach()
 
         t.requires_grad = False
-        delay = delay.unsqueeze(-1).expand(*self.shape_in, length, 1)
+        delay = delay.expand(*self.shape_in, steps, 1)
         c_aif_a = self.NN_aif(t - delay/self.std_t)
         c_aif_b = self.NN_aif(t - delay/self.std_t - 24*mtt/self.std_t)
 
@@ -158,12 +145,22 @@ class PPINN(nn.Module):
             self.var_list = self.parameters()
         else:
             raise NotImplementedError('Get to work and implement it!')
-
+    def set_delay_parameter(self):
+        if self.delay_type == 'learned':
+            self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+        elif self.delay_type == 'calculated_peak':
+            self.flow_t_delay = torch.rand(*self.shape_in, 1, 1).to(self.device)
+        elif self.delay_type == 'fixed':
+            self.flow_t_delay = self.perfusion_values[..., 1] / 3
+            self.flow_t_delay = self.flow_t_delay.view(*self.flow_t_delay.shape, 1,1)
+            self.flow_t_delay = self.flow_t_delay.to(self.device)
+        else:
+            raise NotImplementedError('Delay type not implemented...')
     def get_ode_params(self):
         return [self.flow_cbf, self.flow_mtt]
 
     def get_delay(self, seconds=True):
-        return self.flow_t_delay
+        return 3 * self.flow_t_delay
 
     def get_mtt(self, seconds=True):
         _, mtt_par = self.get_ode_params()
@@ -174,7 +171,7 @@ class PPINN(nn.Module):
 
     def get_cbf(self, seconds=True):
         density = 1.05
-        constant = (100/density) * 0.55 / 0.75# * 0.55 / 0.75
+        constant = (100/density) * 0.55 / 0.75
         constant = torch.as_tensor(constant).to(self.device)
         f_s, _ = self.get_ode_params()
         if seconds:
@@ -348,8 +345,8 @@ class PPINN(nn.Module):
         fig, ax = plt.subplots(2, 4)
 
         ax[0,0].set_title('CBF (ml/100g/min)')
-        ax[0,0].imshow(cbf[i,j], vmin=0, vmax=150, cmap='jet')
-        im = ax[1,0].imshow(gt_cbf[i,j], vmin=0, vmax=150, cmap='jet')
+        ax[0,0].imshow(cbf[i,j], vmin=0, vmax=300, cmap='jet')
+        im = ax[1,0].imshow(gt_cbf[i,j], vmin=0, vmax=300, cmap='jet')
         fig.colorbar(im, ax=ax[1,0], location="bottom")
 
         ax[0,1].set_title('MTT (s)')
