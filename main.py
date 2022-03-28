@@ -5,14 +5,11 @@ from torch.utils.data import DataLoader
 import torch
 def train():
     data_dict = data_utils.load_data(gaussian_filter_type='spatial', sd=2.5)
-    plt.plot(data_dict['time'], data_dict['aif'], c='k')
-    for i in range(208, 209):
-        for j in range(16, 208, 32):
-            plt.plot(data_dict['time'], data_dict['curves'][0,0,j,i,:].numpy())
-    plt.ylim(0.2, 1)
-    plt.show()
-    get_bolus_arrival_time(data_dict['aif'])
-    plt.show()
+    # plt.plot(data_dict['time'], data_dict['aif'], c='k')
+    # for i in range(208, 209):
+    #     for j in range(16, 208, 32):
+    #         plt.scatter(data_dict['time'], data_dict['curves'][0,0,j,i,:].numpy())
+    # plt.show()
     # for i in range(16, 208, 32):
     #     for j in range(16, 208, 32):
     #         get_bolus_arrival_time(data_dict['curves'][0,0,i,j,:])
@@ -36,7 +33,7 @@ def train():
               data_dict['bound'],
               data_dict['perfusion_values'],
               batch_size=32,
-              epochs=5000)
+              epochs=6000)
 
     ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch='End')
     # print(data_dict['perfusion_values'])

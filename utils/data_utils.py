@@ -14,19 +14,12 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     # values: AIF/VOF, Exp R(t) for CBV 1-5, Lin R(t) for CBV 1-5, Box R(t) for CBV 1-5,
     image_data = rearrange(image_data, '(t values) h w -> values t h w', t=30)
     image_data = image_data.astype(np.float32)
-    if gaussian_filter_type:
-        image_data = apply_gaussian_filter(gaussian_filter_type, image_data, sd=sd)
-    # apply kernel k = [0.25, 0.5, 0.25] to all curves
-    k = np.array([0.25, 0.5, 0.25])
-    k = k.reshape(1,3,1,1)
-    image_data = convolve(image_data, k, mode='nearest')
 
     vof_location = (410,247,16) # start, start, size
     vof_data = image_data[0,
                :,
                vof_location[0]:vof_location[0]+vof_location[2],
                vof_location[1]:vof_location[1]+vof_location[2]]
-
     vof_data = np.mean(vof_data, axis=(1,2))
 
     aif_location = (123,251,8) # start, start, size
@@ -34,8 +27,23 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                :,
                aif_location[0]:aif_location[0]+aif_location[2],
                aif_location[1]:aif_location[1]+aif_location[2]]
-
     aif_data = np.mean(aif_data, axis=(1,2))
+
+    # Correct aif for partial volume effect
+    vof_baseline = np.mean(vof_data[:5])
+    aif_baseline = np.mean(aif_data[:5])
+    aif_wo_baseline = aif_data - aif_baseline
+    vof_wo_baseline = vof_data - vof_baseline
+    cumsum_aif = np.cumsum(aif_wo_baseline)[-1]
+    cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
+    ratio = cumsum_vof / cumsum_aif
+    aif_data = aif_wo_baseline * ratio + aif_baseline
+
+    if gaussian_filter_type:
+        image_data = apply_gaussian_filter(gaussian_filter_type, image_data.copy(), sd=sd)
+    # apply kernel k = [0.25, 0.5, 0.25] to all curves
+    # k = np.array([0.25, 0.5, 0.25])
+    # aif_data = convolve(aif_data, k, mode='nearest')
 
     simulated_data_size = 32 * 7
     scan_center = image_data.shape[-1]//2
@@ -46,15 +54,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                      simulated_data_start:simulated_data_end,
                      simulated_data_start:simulated_data_end]
     perfusion_data = perfusion_data.astype(np.float32)
-
-    # if gaussian_filter_type:
-    #     perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data, sd=sd)
-    # plt.plot(perfusion_data[14, :,256-simulated_data_start, 256-simulated_data_start])
-    # plt.show()
-    # if gaussian_filter_type:
-    #     perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data, sd=sd)
-    # plt.plot(perfusion_data[14, :, 256-simulated_data_start, 256-simulated_data_start])
-    # plt.show()
+    # k = k.reshape(1,3,1,1)
+    # perfusion_data = convolve(perfusion_data, k, mode='nearest')
     # exp_data data has shape 15 (curve simulation type *CBV) x 30 (Time) x 224 (7 x delay_step) x 224 (7 x MTT step)
 
     perfusion_values = np.empty([5, 7, 7, 4])
