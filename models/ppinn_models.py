@@ -21,7 +21,7 @@ class PPINN(nn.Module):
                  trainable_params='all',
                  n_inputs=1,
                  std_t=1,
-                 delay='fixed'):
+                 delay='learned'):
         super(PPINN, self).__init__()
         self.device = 'cuda'
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)

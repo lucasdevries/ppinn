@@ -17,7 +17,7 @@ def train():
     ppinn = PPINN(shape_in=shape_in,
                                n_layers=2,
                                n_units=16,
-                               lr=1e-3,
+                               lr=1e-2,
                                perfusion_values=data_dict['perfusion_values'],
                                loss_weights=(1, 10, 0),
                                bn=False,
