@@ -1,30 +1,41 @@
-from utils import data_utils
+import os
+from utils import data_utils, train_utils
+from utils.config import process_config
+import wandb
 import matplotlib.pyplot as plt
-from models.ppinn_models_backup import PPINN
-from torch.utils.data import DataLoader
+from models.ppinn_models import PPINN
 import torch
-def train():
-    data_dict = data_utils.load_data(gaussian_filter_type='spatial', sd=2.5)
-    # plt.plot(data_dict['time'], data_dict['aif'], c='k')
-    # for i in range(208, 209):
-    #     for j in range(16, 208, 32):
-    #         plt.plot(data_dict['time'], data_dict['curves'][0,0,j,i,:].numpy())
-    # plt.ylim(0,0.15)
-    # plt.show()
-    # for i in range(16, 208, 32):
-    #     for j in range(16, 208, 32):
-    #         get_bolus_arrival_time(data_dict['curves'][0,0,i,j,:])
+import argparse
+def main():
+    # parse the path of the json config file
+    arg_parser = argparse.ArgumentParser(description="")
+    arg_parser.add_argument(
+        'config',
+        metavar='config_json_file',
+        default='None',
+        help='The Configuration file in json format')
+    args = arg_parser.parse_args()
+    # parse the config json file
+    config = process_config(args.config)
+    # set environment variable for offline runs
+    os.environ["WANDB_MODE"] = "online"
+    # Pass them to wandb.init
+    wandb.init(config=dict(config), project="ppinn")
+    # Access all hyperparameter values through wandb.config
+    config = wandb.config
+    train_utils.set_seed(config['seed'])
+    config['run_name'] = wandb.run.name
+    config['run_id'] = wandb.run.id
+    train(config)
+
+def train(config):
+    data_dict = data_utils.load_data(gaussian_filter_type=config.gaussian_filter_type, sd=config.sd)
     shape_in = data_dict['perfusion_values'].shape[:-1]  # (3, 5, 224, 224)
-    ppinn = PPINN(shape_in=shape_in,
-                               n_layers=2,
-                               n_units=16,
-                               lr=1e-2,
-                               perfusion_values=data_dict['perfusion_values'],
-                               loss_weights=(1, 10, 0),
-                               bn=False,
-                               trainable_params='all',
-                               n_inputs=1,
-                               std_t=data_dict['std_t'])
+    ppinn = PPINN(config,
+                  shape_in=shape_in,
+                  perfusion_values=data_dict['perfusion_values'],
+                  n_inputs=1,
+                  std_t=data_dict['std_t'])
 
     ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch='Start')
     ppinn.fit(data_dict['time'],
@@ -33,25 +44,10 @@ def train():
               data_dict['coll_points'],
               data_dict['bound'],
               data_dict['perfusion_values'],
-              batch_size=32,
-              epochs=3000)
+              batch_size=config.batch_size,
+              epochs=config.epochs)
 
     ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch='End')
-    # print(data_dict['perfusion_values'])
 
-
-def get_bolus_arrival_time(curve):
-
-    curve_dt = torch.gradient(curve)[0]
-    curve_dtdt = torch.gradient(curve_dt)[0]
-    top_2_maximums = torch.topk(curve_dtdt, k=2)
-    index_of_bolus_arrival = torch.min(top_2_maximums.indices).item()
-
-    plt.plot(curve.numpy(), label='curve')
-    # plt.plot(10 * curve_dt.numpy(), label='first derivative')
-    # plt.plot(10 * curve_dtdt.numpy(), label='second derivative')
-    plt.scatter(index_of_bolus_arrival, curve.numpy()[index_of_bolus_arrival], label='Bolus arrival')
-    # plt.legend()
-    plt.show()
 if __name__ == "__main__":
-    train()
+    main()

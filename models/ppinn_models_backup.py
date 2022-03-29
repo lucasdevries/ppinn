@@ -11,22 +11,20 @@ from einops.einops import repeat
 from tqdm import tqdm
 class PPINN(nn.Module):
     def __init__(self,
+                 config,
                  shape_in,
-                 n_layers,
-                 n_units,
-                 lr,
                  perfusion_values,
-                 loss_weights=(1, 1, 0),
-                 bn=False,
-                 trainable_params='all',
+                 milestones,
                  n_inputs=1,
                  std_t=1,
                  delay='learned'):
         super(PPINN, self).__init__()
+
         self.device = 'cuda'
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
         self.optimizer = None
         self.scheduler = None
+        self.milestones = [int(0.60 * config.epochs), int(0.80 * config.epochs)]
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
@@ -41,6 +39,12 @@ class PPINN(nn.Module):
         self.delay_type = delay
         self.log_domain = False
         self.set_delay_parameter()
+
+        n_layers = config.n_layers
+        n_units = config.n_units
+        lr = config.lr
+        loss_weights = (config.lw_data, config.lw_res, 0)
+        bn = config.bn
 
         self.NN_tissue = MLP(
             self.shape_in,
@@ -225,7 +229,7 @@ class PPINN(nn.Module):
     def set_lr(self, lr):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
-                                                              milestones=[5000,7000,9000],
+                                                              milestones=self.milestones,
                                                               gamma=0.5)
 
     def set_device(self, device):
@@ -308,7 +312,6 @@ class PPINN(nn.Module):
             gt,
             batch_size,
             epochs):
-
         t0 = time.time()
         collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True)
         for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
@@ -326,7 +329,7 @@ class PPINN(nn.Module):
                 # print(self.get_cbf(seconds=False))
                 self.plot_params(0,0,gt,ep)
 
-            # self.scheduler.step()
+            self.scheduler.step()
             self.current_iteration += 1
 
     def optimize(self,

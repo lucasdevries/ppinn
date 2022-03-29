@@ -1,0 +1,19 @@
+{
+"cuda": true,
+"gpu_device": 0,
+"seed": 1337,
+"wandb_folder": "./wandb/",
+"n_layers": 2,
+"n_units": 16,
+"lr": 1e-2,
+"lw_data" : 1,
+"lw_res" : 10,
+"bn" : false,
+"batch_size": 32,
+"epochs": 6000,
+"gaussian_filter_type": "spatial",
+"sd": 2.5,
+"plot_params_every": 500,
+"delay_type": "learned"
+}
+
