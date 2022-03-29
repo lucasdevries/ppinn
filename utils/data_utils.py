@@ -15,6 +15,10 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     image_data = rearrange(image_data, '(t values) h w -> values t h w', t=30)
     image_data = image_data.astype(np.float32)
 
+    # k = np.array([0.25, 0.5, 0.25])
+    # k = k.reshape(1, 3, 1, 1)
+    # image_data = convolve(image_data, k, mode='nearest')
+
     vof_location = (410,247,16) # start, start, size
     vof_data = image_data[0,
                :,
@@ -41,9 +45,6 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
 
     if gaussian_filter_type:
         image_data = apply_gaussian_filter(gaussian_filter_type, image_data.copy(), sd=sd)
-    # apply kernel k = [0.25, 0.5, 0.25] to all curves
-    # k = np.array([0.25, 0.5, 0.25])
-    # aif_data = convolve(aif_data, k, mode='nearest')
 
     simulated_data_size = 32 * 7
     scan_center = image_data.shape[-1]//2
@@ -54,7 +55,11 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                      simulated_data_start:simulated_data_end,
                      simulated_data_start:simulated_data_end]
     perfusion_data = perfusion_data.astype(np.float32)
-    # k = k.reshape(1,3,1,1)
+    # if gaussian_filter_type:
+    #     perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data, sd=sd)
+    # apply kernel k = [0.25, 0.5, 0.25] to all curves
+    k = np.array([0.25, 0.5, 0.25])
+    k = k.reshape(1,3,1,1)
     # perfusion_data = convolve(perfusion_data, k, mode='nearest')
     # exp_data data has shape 15 (curve simulation type *CBV) x 30 (Time) x 224 (7 x delay_step) x 224 (7 x MTT step)
 

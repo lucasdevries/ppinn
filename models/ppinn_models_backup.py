@@ -39,7 +39,7 @@ class PPINN(nn.Module):
         self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1)*high)
         self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
         self.delay_type = delay
-        self.log_domain = True
+        self.log_domain = False
         self.set_delay_parameter()
 
         self.NN_tissue = MLP(

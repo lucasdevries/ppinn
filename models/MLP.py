@@ -38,13 +38,17 @@ class MLP(nn.Module):
             layers.append(self.act)
             layers.append(nn.Linear(self.n_units, self.n_units))
             if self.bn:
-                layers.append(Rearrange('cbv n h w b t -> (cbv n h w b) t'))
-                layers.append(nn.BatchNorm1d(self.n_units))
-                layers.append(Rearrange('(cbv n h w b) t -> cbv n h w b t',
-                                        cbv=self.shape_in[0],
-                                        n=self.shape_in[1],
-                                        h=self.shape_in[2],
-                                        w=self.shape_in[3]))
+                if self.aif:
+                    layers.append(Rearrange('cbv n h w b t -> (cbv n h w b) t'))
+                    layers.append(nn.BatchNorm1d(self.n_units))
+                    layers.append(Rearrange('(cbv n h w b) t -> cbv n h w b t',
+                                            cbv=self.shape_in[0],
+                                            n=self.shape_in[1],
+                                            h=self.shape_in[2],
+                                            w=self.shape_in[3]))
+                else:
+                    layers.append(nn.BatchNorm1d(self.n_units))
+
         layers.append(self.act)
         if not self.aif:
             layers.append(nn.Linear(self.n_units,
