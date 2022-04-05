@@ -14,9 +14,9 @@
   "gaussian_filter_type": "spatial",
   "sd": 2.5,
   "plot_params_every": 500,
-  "delay_type": "learned",
-  "cbf_type": "fixed",
-  "mtt_type": "fixed",
+  "delay_type": "fixed",
+  "cbf_type": "learned",
+  "mtt_type": "learned",
   "log_domain": true
 }
 

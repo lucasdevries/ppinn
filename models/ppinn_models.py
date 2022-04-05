@@ -184,6 +184,7 @@ class PPINN(nn.Module):
     def set_mtt_parameter(self):
         if self.mtt_type == 'learned':
             self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+            torch.nn.init.uniform_(self.flow_mtt, 0.75, 1)
         elif self.mtt_type == 'fixed':
             if self.log_domain:
                 self.flow_mtt = torch.log(self.perfusion_values[..., 2]*60 / 24)
@@ -263,7 +264,7 @@ class PPINN(nn.Module):
                        "residual_loss": epoch_residual_loss.avg,
                        "lr": self.optimizer.param_groups[0]['lr'],
                        }
-            validation_metrics = self.validate()
+            validation_metrics = self.validate(data_time, data_curves)
             metrics.update(validation_metrics)
 
             wandb.log(metrics, step=self.current_iteration)
@@ -281,7 +282,9 @@ class PPINN(nn.Module):
                  ):
         self.train()
         self.optimizer.zero_grad()
-
+        # for name, param in self.named_parameters():
+        #     if 'flow' in name:
+        #         print(name, torch.exp(param.data))
         batch_time = batch_time.to(self.device)
         batch_aif = batch_aif.to(self.device)
         batch_curves = batch_curves.to(self.device)
@@ -324,7 +327,7 @@ class PPINN(nn.Module):
         self.optimizer.step()
         return loss_aif, loss_tissue, loss_residual
 
-    def validate(self):
+    def validate(self, data_time, data_curves):
 
         # 0:'cbv', 1:'delay', 2:'mtt_m', 3:'cbf'
 
@@ -338,16 +341,13 @@ class PPINN(nn.Module):
         cbf = self.get_cbf(seconds=False).squeeze(-1)
         mtt = self.get_mtt(seconds=True).squeeze(-1)
         # cbf = torch.clip(cbf, min=0, max=125)
-        # if self.current_iteration > 5000:
+        # if self.current_iteration > 1500:
         #     curves = self.NN_tissue(data_time.to(self.device).unsqueeze(-1))
-        #     indices = (cbf < 5).nonzero(as_tuple=True)
-        #     hard_curves = data_curves[indices]
-        #     print('hard curves')
-        #
-        #     mtt = self.get_mtt(seconds=True).squeeze(-1)
+        #     # indices = (cbf < 5).nonzero(as_tuple=True)
+        #     # hard_curves = data_curves[indices]
         #     indices = (mtt < 5).nonzero(as_tuple=True)
         #     hard_curves = data_curves[indices]
-
+        #     hard_curves = hard_curves
             # for i in range(98):
             #     plt.plot(hard_curves[i].cpu().detach().numpy())
             # plt.ylim(0.07, 0.1)
