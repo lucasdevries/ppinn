@@ -37,7 +37,7 @@ def train(config):
                   n_inputs=1,
                   std_t=data_dict['std_t'])
 
-    ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch='Start')
+    ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
     ppinn.fit(data_dict['time'],
               data_dict['aif'],
               data_dict['curves'],
@@ -46,8 +46,5 @@ def train(config):
               data_dict['perfusion_values'],
               batch_size=config.batch_size,
               epochs=config.epochs)
-
-    ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch='End')
-
 if __name__ == "__main__":
     main()

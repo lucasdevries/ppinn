@@ -43,8 +43,7 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     ratio = cumsum_vof / cumsum_aif
     aif_data = aif_wo_baseline * ratio + aif_baseline
 
-    if gaussian_filter_type:
-        image_data = apply_gaussian_filter(gaussian_filter_type, image_data.copy(), sd=sd)
+
 
     simulated_data_size = 32 * 7
     scan_center = image_data.shape[-1]//2
@@ -55,6 +54,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
                      simulated_data_start:simulated_data_end,
                      simulated_data_start:simulated_data_end]
     perfusion_data = perfusion_data.astype(np.float32)
+    if gaussian_filter_type:
+        perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data.copy(), sd=sd)
     # if gaussian_filter_type:
     #     perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data, sd=sd)
     # apply kernel k = [0.25, 0.5, 0.25] to all curves
