@@ -46,13 +46,16 @@ class PPINN(nn.Module):
         self.neurons_out = 1
         self.perfusion_values = perfusion_values
         # initialize flow parameters
-        low = 0
-        high = 100 / (69.84 * 60)
-        self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
-        self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+
+        # self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
+        # self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
         self.delay_type = self.config.delay_type
+        self.cbf_type = self.config.cbf_type
+        self.mtt_type = self.config.mtt_type
         self.log_domain = config.log_domain
         self.set_delay_parameter()
+        self.set_cbf_parameter()
+        self.set_mtt_parameter()
 
         n_layers = config.n_layers
         n_units = config.n_units
@@ -87,83 +90,6 @@ class PPINN(nn.Module):
         self.set_device(self.device)
         self.float()
 
-    def get_delay_bolus_arrival_time(self, t):
-        find_max_batch = torch.arange(torch.min(t).item(), torch.max(t).item(), step=0.01).unsqueeze(-1).to(self.device)
-        aif_estimation = self.NN_aif(find_max_batch)
-        aif_dt = torch.gradient(aif_estimation)[0]
-        aif_dtdt = torch.gradient(aif_dt)[0]
-        top_2_maximums = torch.topk(aif_dtdt, k=2)
-        index_of_bolus_arrival = torch.min(top_2_maximums.indices).item()
-        bat_aif = find_max_batch[index_of_bolus_arrival]
-        # plt.plot(aif_estimation.cpu().detach().numpy(), label='curve')
-        # plt.plot(10 * aif_dt.cpu().detach().numpy(), label='first derivative')
-        # plt.plot(10 * aif_dtdt.cpu().detach().numpy(), label='second derivative')
-        # plt.scatter(index_of_bolus_arrival, aif_estimation.cpu().detach().numpy()[index_of_bolus_arrival],
-        #             label='Bolus arrival', c='k')
-        # plt.legend()
-        # plt.show()
-        find_max_batch.requires_grad = True
-        tac_estimation = self.NN_tissue(find_max_batch)
-        tac_dt = self.__fwd_gradients(tac_estimation, find_max_batch)
-        tac_dtdt = self.__fwd_gradients(tac_dt, find_max_batch)
-        # tac_dtdtdt = self.__fwd_gradients(tac_dtdt, find_max_batch)
-        # for i in range(16, 17):
-        #     for j in range(16, 224-16, 32):
-        #         plt.plot(find_max_batch.detach().cpu().numpy()*self.std_t.numpy(),
-        #                  tac_estimation[0,0,i,j].detach().cpu().numpy())
-        # plt.plot(find_max_batch.detach().cpu().numpy() * self.std_t.numpy(),
-        #          aif_estimation.detach().cpu().numpy())
-        # plt.ylim(0.1, 0.4)
-        # plt.show()
-        # for i in range(10):
-        #     for j in range(10):
-        #         plt.plot(tac_dt[0,0,i,j].detach().cpu().numpy())
-        # plt.show()
-        # for i in range(10):
-        #     for j in range(10):
-        #         plt.plot(tac_dtdt[0,0,i,j].detach().cpu().numpy())
-        # plt.show()
-        # for i in range(10):
-        #     for j in range(10):
-        #         plt.plot(tac_dtdtdt[0,0,i,j].detach().cpu().numpy())
-        # plt.show()
-
-        top_2_maximums_tac = torch.topk(tac_dtdt, k=2, dim=-1)
-        top_2_maximum_tac_indices = top_2_maximums_tac.indices.data
-        index_of_bolus_arrival_tac = torch.min(top_2_maximum_tac_indices, dim=-1).values
-        find_max_batch = find_max_batch.expand(*self.shape_in, len(find_max_batch), 1)
-        index_of_bolus_arrival_tac = index_of_bolus_arrival_tac.unsqueeze(-1).unsqueeze(-1).long()
-        bat_tac = torch.gather(find_max_batch, dim=-2, index=index_of_bolus_arrival_tac)
-
-        delay = bat_tac - bat_aif
-        delay *= self.std_t
-        if self.current_iteration == 1999:
-            plt.plot(aif_estimation.cpu().detach().numpy(), c='k')
-            plt.scatter(index_of_bolus_arrival, 0.5)
-
-            for i in range(16, 17):
-                for j in range(16, 208, 32):
-                    plt.plot(tac_estimation.cpu().detach().numpy()[0, 0, i, j])
-                    plt.scatter(index_of_bolus_arrival_tac.cpu().detach().numpy()[0, 0, i, j], 0.5)
-            plt.show()
-
-        return delay
-
-        # return bolus_arrival_aif, bolus_arrival_tissue
-
-    def get_delay_between_peaks(self, t):
-        find_max_batch = torch.arange(torch.min(t).item(), torch.max(t).item(), step=0.01).unsqueeze(-1).to(self.device)
-        # get maximum time of tac curve
-        tac_estimation = self.NN_tissue(find_max_batch)
-        largest_tac = find_max_batch[torch.topk(tac_estimation, k=1, dim=-1).indices].squeeze(-1)
-        # get maximum time of aif curve
-        aif_estimation = self.NN_aif(find_max_batch)
-        largest_aif = find_max_batch[torch.topk(aif_estimation, k=1, dim=-1).indices]
-        largest_aif = largest_aif.expand(*self.shape_in, 1)
-
-        delay = largest_tac - largest_aif
-        delay *= self.std_t
-        return delay.unsqueeze(-1)
 
     def forward_NNs(self, t):
         t = t.unsqueeze(-1)
@@ -192,7 +118,6 @@ class PPINN(nn.Module):
         # Get AIF NN output:
         t = t.view(1, 1, 1, 1, steps, 1)
         t = t.expand(*self.shape_in, steps, 1)
-
         t = t.detach()
 
         t.requires_grad = False
@@ -230,10 +155,6 @@ class PPINN(nn.Module):
     def set_delay_parameter(self):
         if self.delay_type == 'learned':
             self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-        elif self.delay_type == 'calculated_peak':
-            self.flow_t_delay = torch.rand(*self.shape_in, 1, 1).to(self.device)
-        elif self.delay_type == 'calculated_bat':
-            self.flow_t_delay = torch.rand(*self.shape_in, 1, 1).to(self.device)
         elif self.delay_type == 'fixed':
             if self.log_domain:
                 self.flow_t_delay = torch.log(self.perfusion_values[..., 1] / 3)
@@ -243,7 +164,35 @@ class PPINN(nn.Module):
             self.flow_t_delay = self.flow_t_delay.to(self.device)
         else:
             raise NotImplementedError('Delay type not implemented...')
+    def set_cbf_parameter(self):
+        low = 0
+        high = 100 / (69.84 * 60)
+        density = 1.05
+        constant = (100 / density) * 0.55 / 0.75
+        if self.cbf_type == 'learned':
+            self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
+        elif self.cbf_type == 'fixed':
+            if self.log_domain:
+                self.flow_cbf = torch.log(self.perfusion_values[..., 3] / (constant * 60))
+            else:
+                self.flow_cbf = self.perfusion_values[..., 3] / (constant * 60)
+            self.flow_cbf = self.flow_cbf.view(*self.flow_cbf.shape, 1)
+            self.flow_cbf = self.flow_cbf.to(self.device)
+        else:
+            raise NotImplementedError('Delay type not implemented...')
 
+    def set_mtt_parameter(self):
+        if self.mtt_type == 'learned':
+            self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+        elif self.mtt_type == 'fixed':
+            if self.log_domain:
+                self.flow_mtt = torch.log(self.perfusion_values[..., 2]*60 / 24)
+            else:
+                self.flow_mtt = self.perfusion_values[..., 2]*60 / 24
+            self.flow_mtt = self.flow_mtt.view(*self.flow_cbf.shape, 1)
+            self.flow_mtt = self.flow_mtt.to(self.device)
+        else:
+            raise NotImplementedError('Delay type not implemented...')
     def get_ode_params(self):
         if self.log_domain:
             return [torch.exp(self.flow_cbf), 24 * torch.exp(self.flow_mtt), 3 * torch.exp(self.flow_t_delay)]
@@ -302,12 +251,10 @@ class PPINN(nn.Module):
                                                          batch_curves,
                                                          batch_boundary,
                                                          batch_collopoints)
-                if self.current_iteration > 6000:
-                    epoch_residual_loss.update(loss_residual.item(), len(batch_time))
-                else:
-                    epoch_aif_loss.update(loss_aif.item(), len(batch_time))
-                    epoch_tissue_loss.update(loss_tissue.item(), len(batch_time))
-                    epoch_residual_loss.update(loss_residual.item(), len(batch_time))
+
+                epoch_aif_loss.update(loss_aif.item(), len(batch_time))
+                epoch_tissue_loss.update(loss_tissue.item(), len(batch_time))
+                epoch_residual_loss.update(loss_residual.item(), len(batch_collopoints))
 
             # self.scheduler.step()
 
@@ -316,7 +263,7 @@ class PPINN(nn.Module):
                        "residual_loss": epoch_residual_loss.avg,
                        "lr": self.optimizer.param_groups[0]['lr'],
                        }
-            validation_metrics = self.validate(data_curves)
+            validation_metrics = self.validate()
             metrics.update(validation_metrics)
 
             wandb.log(metrics, step=self.current_iteration)
@@ -345,7 +292,8 @@ class PPINN(nn.Module):
         batch_boundary.requires_grad = True
         loss = torch.as_tensor(0.).to(self.device)
         loss_aif, loss_tissue, loss_residual = 999, 999, 999
-        if self.current_iteration > 6000:
+
+        if self.current_iteration < 0:
             if self.lw_res:
                 # compute residual loss
                 c_aif, c_tissue, residual = self.forward_complete(batch_collopoints)
@@ -355,7 +303,10 @@ class PPINN(nn.Module):
         else:
             if self.lw_data:
                 # compute data loss
-                c_aif, c_tissue = self.forward_NNs(batch_time)
+                if self.current_iteration > 6000:
+                    c_aif, c_tissue = self.forward_NNs(batch_time)
+                else:
+                    c_aif, c_tissue = self.forward_NNs(batch_time)
                 loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
                 loss += self.lw_data * (loss_aif + loss_tissue)
             if self.lw_res:
@@ -385,11 +336,27 @@ class PPINN(nn.Module):
         [gt_cbv, gt_cbf, gt_mtt, gt_delay] = [torch.as_tensor(x).to(self.device)
                                               for x in [gt_cbv, gt_cbf, gt_mtt, gt_delay]]
         cbf = self.get_cbf(seconds=False).squeeze(-1)
+        mtt = self.get_mtt(seconds=True).squeeze(-1)
         # cbf = torch.clip(cbf, min=0, max=125)
-        # if self.current_iteration > 10000:
+        # if self.current_iteration > 5000:
+        #     curves = self.NN_tissue(data_time.to(self.device).unsqueeze(-1))
         #     indices = (cbf < 5).nonzero(as_tuple=True)
         #     hard_curves = data_curves[indices]
         #     print('hard curves')
+        #
+        #     mtt = self.get_mtt(seconds=True).squeeze(-1)
+        #     indices = (mtt < 5).nonzero(as_tuple=True)
+        #     hard_curves = data_curves[indices]
+
+            # for i in range(98):
+            #     plt.plot(hard_curves[i].cpu().detach().numpy())
+            # plt.ylim(0.07, 0.1)
+            # plt.show()
+            # estimated_hard_curves = curves[indices]
+            # for i in range(98):
+            #     plt.plot(estimated_hard_curves[i].cpu().detach().numpy())
+            # plt.ylim(0.07, 0.1)
+            # plt.show()
 
         mtt = self.get_mtt(seconds=True).squeeze(-1)
         mtt_min = self.get_mtt(seconds=False).squeeze(-1)
@@ -465,7 +432,7 @@ class PPINN(nn.Module):
 
         [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay] = [x.detach().cpu().numpy() for x in
                                                           [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay]]
-
+        # TODO plot the hist of mtt gt
         i, j = 0, 0
 
         # fig, ax = plt.subplots(1, 4)
@@ -494,23 +461,23 @@ class PPINN(nn.Module):
         fig, ax = plt.subplots(2, 4)
 
         ax[0, 0].set_title('CBF (ml/100g/min)')
-        ax[0, 0].imshow(cbf[i, j], vmin=0, vmax=90, cmap='jet')
-        im = ax[1, 0].imshow(gt_cbf[i, j], vmin=0, vmax=90, cmap='jet')
+        ax[0, 0].imshow(cbf[i, j], vmin=0.01, vmax=90, cmap='jet')
+        im = ax[1, 0].imshow(gt_cbf[i, j], vmin=0.01, vmax=90, cmap='jet')
         fig.colorbar(im, ax=ax[1, 0], location="bottom")
 
         ax[0, 1].set_title('MTT (s)')
-        ax[0, 1].imshow(mtt[i, j], vmin=0, vmax=24, cmap='jet')
-        im = ax[1, 1].imshow(gt_mtt[i, j], vmin=0, vmax=24, cmap='jet')
+        ax[0, 1].imshow(mtt[i, j], vmin=0.01, vmax=24, cmap='jet')
+        im = ax[1, 1].imshow(gt_mtt[i, j], vmin=0.01, vmax=24, cmap='jet')
         fig.colorbar(im, ax=ax[1, 1], location="bottom")
 
         ax[0, 2].set_title('CBV (ml/100g)')
-        ax[0, 2].imshow(cbv[i, j], vmin=0, vmax=7, cmap='jet')
-        im = ax[1, 2].imshow(gt_cbv[i, j], vmin=0, vmax=7, cmap='jet')
+        ax[0, 2].imshow(cbv[i, j], vmin=0.01, vmax=7, cmap='jet')
+        im = ax[1, 2].imshow(gt_cbv[i, j], vmin=0.01, vmax=7, cmap='jet')
         fig.colorbar(im, ax=ax[1, 2], location="bottom")
 
         ax[0, 3].set_title('Delay (s)')
-        im = ax[0, 3].imshow(delay[i, j], vmin=0, vmax=3.5, cmap='jet')
-        im = ax[1, 3].imshow(gt_delay[i, j], vmin=0, vmax=3.5, cmap='jet')
+        im = ax[0, 3].imshow(delay[i, j], vmin=0.01, vmax=3.5, cmap='jet')
+        im = ax[1, 3].imshow(gt_delay[i, j], vmin=0.01, vmax=3.5, cmap='jet')
 
         fig.colorbar(im, ax=ax[1, 3], location="bottom")
 

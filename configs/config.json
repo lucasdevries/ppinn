@@ -7,7 +7,7 @@
   "n_units": 16,
   "lr": 1e-2,
   "lw_data" : 1,
-  "lw_res" : 10,
+  "lw_res" : 1,
   "bn" : false,
   "batch_size": 32,
   "epochs": 12000,
@@ -15,6 +15,8 @@
   "sd": 2.5,
   "plot_params_every": 500,
   "delay_type": "learned",
+  "cbf_type": "fixed",
+  "mtt_type": "fixed",
   "log_domain": true
 }
 
