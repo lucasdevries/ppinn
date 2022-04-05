@@ -171,6 +171,7 @@ class PPINN(nn.Module):
         constant = (100 / density) * 0.55 / 0.75
         if self.cbf_type == 'learned':
             self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
+            torch.nn.init.uniform_(self.flow_cbf, 0, high)
         elif self.cbf_type == 'fixed':
             if self.log_domain:
                 self.flow_cbf = torch.log(self.perfusion_values[..., 3] / (constant * 60))

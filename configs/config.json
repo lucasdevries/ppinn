@@ -7,7 +7,7 @@
   "n_units": 16,
   "lr": 1e-2,
   "lw_data" : 1,
-  "lw_res" : 1,
+  "lw_res" : 10,
   "bn" : false,
   "batch_size": 32,
   "epochs": 12000,
