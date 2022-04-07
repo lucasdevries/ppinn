@@ -420,38 +420,17 @@ class PPINN(nn.Module):
         gt_mtt = perfusion_values[..., 2] * 60
         gt_cbf = perfusion_values[..., 3]
 
+        cbf_min, cbf_max = 0.9*torch.min(gt_cbf).item(), 1.1*torch.max(gt_cbf).item()
+
         [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay] = [x.detach().cpu().numpy() for x in
                                                           [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay]]
         i, j = 0, 0
 
-        # fig, ax = plt.subplots(1, 4)
-        # ax[0].hist(cbf[i,j].flatten(), bins=100)
-        # ax[0].set_title('cbf')
-        # ax[1].hist(mtt[i,j].flatten(), bins=100)
-        # ax[1].set_title('mtt')
-        # ax[2].hist(cbv[i,j].flatten(), bins=100)
-        # ax[2].set_title('cbv')
-        # ax[3].hist(delay[i,j].flatten(), bins=100, range=(0,3))
-        # ax[3].set_title('delay')
-        # plt.tight_layout()
-        # plt.show()
-        # plt.show()
-        # fig, ax = plt.subplots(1, 4)
-        # ax[0].hist(cbf[i,j].flatten(), bins=100, range=(0,150))
-        # ax[0].set_title('cbf')
-        # ax[1].hist(mtt[i,j].flatten(), bins=100, range=(0,30))
-        # ax[1].set_title('mtt')
-        # ax[2].hist(cbv[i,j].flatten(), bins=100, range=(0,10))
-        # ax[2].set_title('cbv')
-        # ax[3].hist(delay[i,j].flatten(), bins=100, range=(0,3))
-        # ax[3].set_title('delay')
-        # plt.show()
-
         fig, ax = plt.subplots(2, 4)
 
         ax[0, 0].set_title('CBF (ml/100g/min)')
-        ax[0, 0].imshow(cbf[i, j], vmin=0.01, vmax=90, cmap='jet')
-        im = ax[1, 0].imshow(gt_cbf[i, j], vmin=0.01, vmax=90, cmap='jet')
+        ax[0, 0].imshow(cbf[i, j], vmin=cbf_min, vmax=cbf_max, cmap='jet')
+        im = ax[1, 0].imshow(gt_cbf[i, j], vmin=cbf_min, vmax=cbf_max, cmap='jet')
         fig.colorbar(im, ax=ax[1, 0], location="bottom")
 
         ax[0, 1].set_title('MTT (s)')
