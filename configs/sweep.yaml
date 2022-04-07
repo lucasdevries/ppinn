@@ -3,12 +3,12 @@ method: grid
 parameters:
   sd:
     values:
-      - 5
-      - 4
+      - 0
+      - 1
+      - 2
       - 3
-      - 2.5
-      - 1.5
-      - 0.93
+      - 4
+      - 5
 command:
   - ${env}
   - python

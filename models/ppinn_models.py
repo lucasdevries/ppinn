@@ -38,7 +38,7 @@ class PPINN(nn.Module):
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
         self.optimizer = None
         self.scheduler = None
-        # self.milestones = [config.epochs, int(0.95 * config.epochs]
+        self.milestones = [int(0.5*config.epochs), int(0.8 * config.epochs)]
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
@@ -46,13 +46,10 @@ class PPINN(nn.Module):
         self.neurons_out = 1
         self.perfusion_values = perfusion_values
         # initialize flow parameters
-
-        # self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
-        # self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+        self.log_domain = config.log_domain
         self.delay_type = self.config.delay_type
         self.cbf_type = self.config.cbf_type
         self.mtt_type = self.config.mtt_type
-        self.log_domain = config.log_domain
         self.set_delay_parameter()
         self.set_cbf_parameter()
         self.set_mtt_parameter()
@@ -140,9 +137,9 @@ class PPINN(nn.Module):
         # base_opt = torch.optim.Adam(self.parameters(), lr=lr)
         # self.optimizer = SWA(base_opt, swa_start=2000, swa_freq=1)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        # self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
-        #                                                       milestones=self.milestones,
-        #                                                       gamma=0.5)
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
+                                                              milestones=self.milestones,
+                                                              gamma=0.5)
 
     def set_device(self, device):
         self.to(device)
@@ -258,7 +255,7 @@ class PPINN(nn.Module):
                 epoch_tissue_loss.update(loss_tissue.item(), len(batch_time))
                 epoch_residual_loss.update(loss_residual.item(), len(batch_collopoints))
 
-            # self.scheduler.step()
+            self.scheduler.step()
 
             metrics = {"aif_loss": epoch_aif_loss.avg,
                        "tissue_loss": epoch_tissue_loss.avg,
@@ -433,7 +430,6 @@ class PPINN(nn.Module):
 
         [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay] = [x.detach().cpu().numpy() for x in
                                                           [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay]]
-        # TODO plot the hist of mtt gt
         i, j = 0, 0
 
         # fig, ax = plt.subplots(1, 4)
@@ -488,3 +484,4 @@ class PPINN(nn.Module):
         plt.tight_layout()
         wandb.log({"parameters": plt}, step=epoch)
         # plt.show()
+        plt.close()
