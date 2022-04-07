@@ -10,7 +10,7 @@
   "lw_res" : 10,
   "bn" : false,
   "batch_size": 32,
-  "epochs": 100,
+  "epochs": 30000,
   "gaussian_filter_type": "spatial",
   "sd": 2.5,
   "plot_params_every": 500,
