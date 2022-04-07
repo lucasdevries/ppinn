@@ -46,5 +46,6 @@ def train(config):
               data_dict['perfusion_values'],
               batch_size=config.batch_size,
               epochs=config.epochs)
+    ppinn.save_parameters()
 if __name__ == "__main__":
     main()

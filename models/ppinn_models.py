@@ -262,7 +262,7 @@ class PPINN(nn.Module):
                        "residual_loss": epoch_residual_loss.avg,
                        "lr": self.optimizer.param_groups[0]['lr'],
                        }
-            validation_metrics = self.validate(data_time, data_curves)
+            validation_metrics = self.validate()
             metrics.update(validation_metrics)
 
             wandb.log(metrics, step=self.current_iteration)
@@ -325,7 +325,7 @@ class PPINN(nn.Module):
         self.optimizer.step()
         return loss_aif, loss_tissue, loss_residual
 
-    def validate(self, data_time, data_curves):
+    def validate(self):
 
         # 0:'cbv', 1:'delay', 2:'mtt_m', 3:'cbf'
 
@@ -338,31 +338,9 @@ class PPINN(nn.Module):
                                               for x in [gt_cbv, gt_cbf, gt_mtt, gt_delay]]
         cbf = self.get_cbf(seconds=False).squeeze(-1)
         mtt = self.get_mtt(seconds=True).squeeze(-1)
-        # cbf = torch.clip(cbf, min=0, max=125)
-        # if self.current_iteration > 1500:
-        #     curves = self.NN_tissue(data_time.to(self.device).unsqueeze(-1))
-        #     # indices = (cbf < 5).nonzero(as_tuple=True)
-        #     # hard_curves = data_curves[indices]
-        #     indices = (mtt < 5).nonzero(as_tuple=True)
-        #     hard_curves = data_curves[indices]
-        #     hard_curves = hard_curves
-            # for i in range(98):
-            #     plt.plot(hard_curves[i].cpu().detach().numpy())
-            # plt.ylim(0.07, 0.1)
-            # plt.show()
-            # estimated_hard_curves = curves[indices]
-            # for i in range(98):
-            #     plt.plot(estimated_hard_curves[i].cpu().detach().numpy())
-            # plt.ylim(0.07, 0.1)
-            # plt.show()
-
-        mtt = self.get_mtt(seconds=True).squeeze(-1)
         mtt_min = self.get_mtt(seconds=False).squeeze(-1)
         delay = self.get_delay(seconds=True).squeeze(-1).squeeze(-1)
         cbv = cbf * mtt_min
-        # if self.current_iteration > 1500:
-        #     own_delay = (delay - gt_delay)**2
-        #     print('hoi')
         cbv_mse = torch.nn.functional.mse_loss(cbv, gt_cbv).item()
         cbf_mse = torch.nn.functional.mse_loss(cbf, gt_cbf).item()
         mtt_mse = torch.nn.functional.mse_loss(mtt, gt_mtt).item()
@@ -371,6 +349,24 @@ class PPINN(nn.Module):
                 'cbf_mse': cbf_mse,
                 'mtt_mse': mtt_mse,
                 'delay_mse': delay_mse}
+
+    def save_parameters(self):
+        # Save NNs
+        torch.save(self.state_dict(), os.path.join(wandb.run.dir, 'model.pth.tar'))
+        torch.save(self.NN_tissue.state_dict(), os.path.join(wandb.run.dir, 'NN_tissue.pth.tar'))
+        torch.save(self.NN_aif.state_dict(), os.path.join(wandb.run.dir, 'NN_aif.pth.tar'))
+        # Save parameters
+        torch.save(self.flow_mtt, os.path.join(wandb.run.dir, 'flow_mtt.pth.tar'))
+        torch.save(self.flow_cbf, os.path.join(wandb.run.dir, 'flow_cbf.pth.tar'))
+        torch.save(self.flow_t_delay, os.path.join(wandb.run.dir, 'flow_t_delay.pth.tar'))
+        # Save parameter data
+        for name, param in self.named_parameters():
+            if 'flow_' in name:
+                parameter_data = param.data.cpu().numpy()
+                with open(os.path.join(wandb.run.dir, f'{name}.npy'), 'wb') as f:
+                    np.save(f, parameter_data)
+
+
 
     def __loss_data(self, aif, curves, c_aif, c_tissue):
         # reshape the ground truth
