@@ -29,7 +29,8 @@ def main():
     train(config)
 
 def train(config):
-    data_dict = data_utils.load_data(gaussian_filter_type=config.gaussian_filter_type, sd=config.sd)
+    data_dict = data_utils.load_data(gaussian_filter_type=config.gaussian_filter_type, sd=config.sd,
+                                     cbv_slice=config.cbv_slice, simulation_method=config.simulation_method)
     shape_in = data_dict['perfusion_values'].shape[:-1]  # (3, 5, 224, 224)
     ppinn = PPINN(config,
                   shape_in=shape_in,

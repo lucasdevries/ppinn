@@ -4,7 +4,7 @@ from einops.einops import rearrange, repeat
 from scipy.ndimage import gaussian_filter, convolve
 import torch
 import matplotlib.pyplot as plt
-def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
+def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT', cbv_slice=4, simulation_method=2):
     print("Reading Dicom directory:", folder)
     reader = sitk.ImageSeriesReader()
     dicom_names = reader.GetGDCMSeriesFileNames(folder)
@@ -84,8 +84,8 @@ def load_data(gaussian_filter_type, sd=2.5, folder=r'data/DigitalPhantomCT'):
     data_dict = {'aif': aif_data,
                  'vof': vof_data,
                  'time': time,
-                 'curves': perfusion_data[2:, 4:, :, :, :],
-                 'perfusion_values': perfusion_values[2:, 4:, :, :, :]}
+                 'curves': perfusion_data[simulation_method:simulation_method+1, cbv_slice:cbv_slice+1, :, :, :],
+                 'perfusion_values': perfusion_values[simulation_method:simulation_method+1, cbv_slice:cbv_slice+1, :, :, :]}
     data_dict = normalize_data(data_dict)
     data_dict = get_coll_points(data_dict)
     data_dict = get_tensors(data_dict)

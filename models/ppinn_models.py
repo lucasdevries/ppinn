@@ -280,9 +280,7 @@ class PPINN(nn.Module):
                  ):
         self.train()
         self.optimizer.zero_grad()
-        # for name, param in self.named_parameters():
-        #     if 'flow' in name:
-        #         print(name, torch.exp(param.data))
+
         batch_time = batch_time.to(self.device)
         batch_aif = batch_aif.to(self.device)
         batch_curves = batch_curves.to(self.device)
@@ -365,8 +363,6 @@ class PPINN(nn.Module):
                 parameter_data = param.data.cpu().numpy()
                 with open(os.path.join(wandb.run.dir, f'{name}.npy'), 'wb') as f:
                     np.save(f, parameter_data)
-
-
 
     def __loss_data(self, aif, curves, c_aif, c_tissue):
         # reshape the ground truth

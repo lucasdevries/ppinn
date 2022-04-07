@@ -3,6 +3,8 @@
   "gpu_device": 0,
   "seed": 11,
   "wandb_folder": "./wandb/",
+  "cbv_slice": 4,
+  "simulation_method": 2,
   "n_layers": 2,
   "n_units": 16,
   "lr": 1e-2,
