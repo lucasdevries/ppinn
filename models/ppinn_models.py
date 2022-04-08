@@ -152,6 +152,7 @@ class PPINN(nn.Module):
     def set_delay_parameter(self):
         if self.delay_type == 'learned':
             self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
+            # torch.nn.init.uniform_(self.flow_t_delay, 0.0, 1)
         elif self.delay_type == 'fixed':
             if self.log_domain:
                 self.flow_t_delay = torch.log(self.perfusion_values[..., 1] / 3)
