@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-
+import SimpleITK as sitk
 def fun(x, auc, tac_k):
     tac_est = gen_tac(x[0]/x[1], x[1], x[2], auc)
     sse = np.sum((tac_est-tac_k)**2)
@@ -22,6 +22,26 @@ def gen_tac(cbf, mtt, d, auc):
     return tac
 
 def boxnlr(aif, tac, dt):
+    result = sitk.ReadImage(r'L:\basic\divi\CMAJOIE\CLEOPATRA\Substudies\Lucas\KudoPhantom\unfiltered_rescaled_aif.nii')
+    result = sitk.GetArrayFromImage(result)
+    result = result[...,144:-144, 144:-144]
+    density = 1.05
+    constant = (100 / density) * 0.55 / 0.75
+
+    cbv = result[0]
+    cbv = cbv * constant
+    mtt = result[1]
+    cbf = cbv / (mtt / 60)
+    delay = result[2]
+    plt.hist(mtt.flatten(), bins=50)
+    plt.show()
+    fig, ax = plt.subplots(1,4)
+    ax[0].imshow(np.transpose(cbv), vmin=0.0, vmax=7, cmap='jet')
+    ax[1].imshow(np.transpose(cbf), vmin=0, vmax=90, cmap='jet')
+    ax[2].imshow(np.transpose(mtt), vmin=0, vmax=24, cmap='jet')
+    ax[3].imshow(np.transpose(delay), vmin=0, vmax=3.5, cmap='jet')
+    plt.show()
+
     x0 = [0.05, 4/dt, 1/dt]
     k = [0.25, 0.5, 0.25]
     aif_k = convolve(aif, k, mode='nearest')
@@ -48,7 +68,7 @@ def train():
     tac = data_dict['curves']
     for i in tqdm(range(x)):
         for j in range(y):
-            x = boxnlr(aif, tac[0,0,i,j], 2)
+            x = boxnlr(aif, tac[0,0,i,j], dt=2)
             cbv[i,j] = x[0]
             mtt[i, j] = x[1]
             delay[i, j] = x[2]

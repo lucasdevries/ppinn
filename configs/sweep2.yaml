@@ -1,20 +1,13 @@
 program: main.py
 method: grid
 parameters:
-  lr:
-    values:
-      - 1e-2
-  seed:
-    values:
-      - 1
-  sd:
+  cbv_slice:
     values:
       - 0
       - 1
       - 2
       - 3
       - 4
-      - 5
 command:
   - ${env}
   - python

@@ -20,6 +20,7 @@ def load_data(gaussian_filter_type, sd=2.5,
     # if gaussian_filter_type and (method == 'nlr'):
     #     print('filter entire scan')
     #     image_data = apply_gaussian_filter(gaussian_filter_type, image_data.copy(), sd=sd)
+
     vof_location = (410,247,16) # start, start, size
     vof_data = image_data[0,
                :,
@@ -33,7 +34,7 @@ def load_data(gaussian_filter_type, sd=2.5,
                aif_location[0]:aif_location[0]+aif_location[2],
                aif_location[1]:aif_location[1]+aif_location[2]]
     aif_data = np.mean(aif_data, axis=(1,2))
-    if method == 'ppinn':
+    if method == 'ppinn' or method == 'nlr':
         # Correct aif for partial volume effect
         vof_baseline = np.mean(vof_data[:5])
         aif_baseline = np.mean(aif_data[:5])
@@ -43,7 +44,7 @@ def load_data(gaussian_filter_type, sd=2.5,
         cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
         ratio = cumsum_vof / cumsum_aif
         aif_data = aif_wo_baseline * ratio + aif_baseline
-
+    # print(list(aif_data))
 
     simulated_data_size = 32 * 7
     scan_center = image_data.shape[-1]//2
