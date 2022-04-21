@@ -11,8 +11,8 @@ from tqdm import tqdm
 import logging
 import os
 import wandb
-from torch.optim.swa_utils import AveragedModel, SWALR
-from torchcontrib.optim import SWA
+from utils.val_utils import load_nlr_results
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 class PPINN(nn.Module):
     def __init__(self,
                  config,
@@ -152,7 +152,7 @@ class PPINN(nn.Module):
     def set_delay_parameter(self):
         if self.delay_type == 'learned':
             self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-            # torch.nn.init.uniform_(self.flow_t_delay, 0.0, 1)
+            torch.nn.init.uniform_(self.flow_t_delay, 0.5, 1)
         elif self.delay_type == 'fixed':
             if self.log_domain:
                 self.flow_t_delay = torch.log(self.perfusion_values[..., 1] / 3)
@@ -169,7 +169,7 @@ class PPINN(nn.Module):
         constant = (100 / density) * 0.55 / 0.75
         if self.cbf_type == 'learned':
             self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
-            torch.nn.init.uniform_(self.flow_cbf, 0, high)
+            torch.nn.init.uniform_(self.flow_cbf, 0.5*high, high)
         elif self.cbf_type == 'fixed':
             if self.log_domain:
                 self.flow_cbf = torch.log(self.perfusion_values[..., 3] / (constant * 60))
@@ -270,6 +270,7 @@ class PPINN(nn.Module):
 
             if ep % self.config.plot_params_every == 0:
                 self.plot_params(0, 0, gt, ep)
+                self.plot_params_difference(0, 0, gt, ep)
             self.current_iteration += 1
 
     def optimize(self,
@@ -421,39 +422,156 @@ class PPINN(nn.Module):
         gt_mtt = perfusion_values[..., 2] * 60
         gt_cbf = perfusion_values[..., 3]
 
+        nlr_results = load_nlr_results()
+
+
         cbf_min, cbf_max = 0.9*torch.min(gt_cbf).item(), 1.1*torch.max(gt_cbf).item()
 
         [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay] = [x.detach().cpu().numpy() for x in
                                                           [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay]]
         i, j = 0, 0
 
-        fig, ax = plt.subplots(2, 4)
+        font = {'family': 'serif',
+                'color': 'black',
+                'weight': 'normal',
+                'size': 15,
+                }
+        plt.rcParams["font.family"] = "serif"
+        plt.rcParams["axes.linewidth"] = 1.5
+        plt.rcParams["figure.dpi"] = 150
+        fig, ax = plt.subplots(4, 4, figsize=(10,12))
 
-        ax[0, 0].set_title('CBF (ml/100g/min)')
+        ax[0, 0].set_title('CBF', fontdict=font)
         ax[0, 0].imshow(cbf[i, j], vmin=cbf_min, vmax=cbf_max, cmap='jet')
-        im = ax[1, 0].imshow(gt_cbf[i, j], vmin=cbf_min, vmax=cbf_max, cmap='jet')
-        fig.colorbar(im, ax=ax[1, 0], location="bottom")
+        ax[1, 0].imshow(nlr_results['cbf'], vmin=cbf_min, vmax=cbf_max, cmap='jet')
+        im = ax[2, 0].imshow(gt_cbf[i, j], vmin=cbf_min, vmax=cbf_max, cmap='jet')
+        cax = ax[3, 0].inset_axes([0, 0.82, 1, 0.1])
+        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+        bar.outline.set_color('black')
+        bar.set_label('ml/100g/min', fontdict=font)
+        bar.ax.tick_params(labelsize=14)
+        ax[0, 0].set_ylabel('PPINN', fontdict=font)
+        ax[1, 0].set_ylabel('NLR', fontdict=font)
+        ax[2, 0].set_ylabel('GT', fontdict=font)
 
-        ax[0, 1].set_title('MTT (s)')
-        ax[0, 1].imshow(mtt[i, j], vmin=0.01, vmax=24, cmap='jet')
-        im = ax[1, 1].imshow(gt_mtt[i, j], vmin=0.01, vmax=24, cmap='jet')
-        fig.colorbar(im, ax=ax[1, 1], location="bottom")
+        ax[0, 1].set_title('MTT (s)', fontdict=font)
+        ax[0, 1].imshow(mtt[i, j], vmin=0.01, vmax=1.1*24, cmap='jet')
+        ax[1, 1].imshow(nlr_results['mtt'], vmin=0.01, vmax=1.1*24, cmap='jet')
+        im = ax[2, 1].imshow(gt_mtt[i, j], vmin=0.01, vmax=1.1*24, cmap='jet')
+        cax = ax[3, 1].inset_axes([0, 0.82, 1, 0.1])
+        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+        bar.outline.set_color('black')
+        bar.set_label('seconds', fontdict=font)
+        bar.ax.tick_params(labelsize=14)
 
-        ax[0, 2].set_title('CBV (ml/100g)')
+        ax[0, 2].set_title('CBV (ml/100g)', fontdict=font)
         ax[0, 2].imshow(cbv[i, j], vmin=0.01, vmax=7, cmap='jet')
-        im = ax[1, 2].imshow(gt_cbv[i, j], vmin=0.01, vmax=7, cmap='jet')
-        fig.colorbar(im, ax=ax[1, 2], location="bottom")
+        ax[1, 2].imshow(nlr_results['cbv'], vmin=0.01, vmax=7, cmap='jet')
+        im = ax[2, 2].imshow(gt_cbv[i, j], vmin=0.01, vmax=7, cmap='jet')
+        cax = ax[3, 2].inset_axes([0, 0.82, 1, 0.1])
+        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+        bar.outline.set_color('black')
+        bar.set_label('ml/100g', fontdict=font)
+        bar.ax.tick_params(labelsize=14)
 
-        ax[0, 3].set_title('Delay (s)')
-        im = ax[0, 3].imshow(delay[i, j], vmin=0.01, vmax=3.5, cmap='jet')
-        im = ax[1, 3].imshow(gt_delay[i, j], vmin=0.01, vmax=3.5, cmap='jet')
+        ax[0, 3].set_title('Delay (s)', fontdict=font)
+        ax[0, 3].imshow(delay[i, j], vmin=0.01, vmax=3.5, cmap='jet')
+        ax[1, 3].imshow(nlr_results['delay'], vmin=0.01, vmax=3.5, cmap='jet')
+        im = ax[2, 3].imshow(gt_delay[i, j], vmin=0.01, vmax=3.5, cmap='jet')
+        cax = ax[3, 3].inset_axes([0, 0.82, 1, 0.1])
+        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+        bar.outline.set_color('black')
+        bar.set_label('seconds', fontdict=font)
+        bar.ax.tick_params(labelsize=14)
 
-        fig.colorbar(im, ax=ax[1, 3], location="bottom")
-
+        for i in range(4):
+            ax[3, i].set_axis_off()
         for x in ax.flatten():
-            x.set_axis_off()
-        fig.suptitle('Parameter estimation epoch: {}'.format(epoch))
+            x.axes.xaxis.set_ticks([])
+            x.axes.yaxis.set_ticks([])
+        fig.suptitle('Parameter estimation epoch: {}'.format(epoch), fontdict=font)
         plt.tight_layout()
         wandb.log({"parameters": plt}, step=epoch)
+        # plt.show()
+        plt.close()
+
+    def plot_params_difference(self, i, j, perfusion_values, epoch):
+        cbf = self.get_cbf(seconds=False).squeeze(-1)
+        mtt = self.get_mtt(seconds=True).squeeze(-1)
+        mtt_min = self.get_mtt(seconds=False).squeeze(-1)
+        delay = self.get_delay(seconds=True).squeeze(-1)
+        # cbf = torch.clip(cbf, min=0, max=125)
+        cbv = cbf * mtt_min
+        # 0:'cbv', 1:'delay', 2:'mtt_m', 3:'cbf'
+        gt_cbv = perfusion_values[..., 0]
+        gt_delay = perfusion_values[..., 1]
+        gt_mtt = perfusion_values[..., 2] * 60
+        gt_cbf = perfusion_values[..., 3]
+
+        nlr_results = load_nlr_results()
+
+        cbf_min, cbf_max = 0.9*torch.min(gt_cbf).item(), 1.1*torch.max(gt_cbf).item()
+
+        [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay, gt_delay] = [x.detach().cpu().numpy() for x in
+                                                          [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay, gt_delay]]
+        i, j = 0, 0
+
+        font = {'family': 'serif',
+                'color': 'black',
+                'weight': 'normal',
+                'size': 15,
+                }
+        plt.rcParams["font.family"] = "serif"
+        plt.rcParams["axes.linewidth"] = 1.5
+        plt.rcParams["figure.dpi"] = 150
+        fig, ax = plt.subplots(3, 4, figsize=(10,10))
+        map = 'bwr'
+        ax[0, 0].set_title('CBF', fontdict=font)
+        ax[0, 0].imshow(cbf[i, j] - gt_cbf[i, j] , vmin=-10, vmax=10, cmap=map)
+        im =ax[1, 0].imshow(nlr_results['cbf'] - gt_cbf[i, j], vmin=-10, vmax=10, cmap=map)
+        cax = ax[2, 0].inset_axes([0, 0.82, 1, 0.1])
+        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+        bar.outline.set_color('black')
+        bar.set_label('ml/100g/min', fontdict=font)
+        bar.ax.tick_params(labelsize=14)
+        ax[0, 0].set_ylabel('PPINN', fontdict=font)
+        ax[1, 0].set_ylabel('NLR', fontdict=font)
+        ax[2, 0].set_ylabel('GT', fontdict=font)
+
+        ax[0, 1].set_title('MTT (s)', fontdict=font)
+        ax[0, 1].imshow(mtt[i, j] - gt_mtt[i, j], vmin=-2, vmax=2, cmap=map)
+        im = ax[1, 1].imshow(nlr_results['mtt'] - gt_mtt[i, j], vmin=-2, vmax=2, cmap=map)
+        cax = ax[2, 1].inset_axes([0, 0.82, 1, 0.1])
+        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+        bar.outline.set_color('black')
+        bar.set_label('seconds', fontdict=font)
+        bar.ax.tick_params(labelsize=14)
+
+        ax[0, 2].set_title('CBV (ml/100g)', fontdict=font)
+        ax[0, 2].imshow(cbv[i, j] - gt_cbv[i, j], vmin=-1, vmax=1, cmap=map)
+        im = ax[1, 2].imshow(nlr_results['cbv'] - gt_cbv[i, j], vmin=-1, vmax=1, cmap=map)
+        cax = ax[2, 2].inset_axes([0, 0.82, 1, 0.1])
+        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+        bar.outline.set_color('black')
+        bar.set_label('ml/100g', fontdict=font)
+        bar.ax.tick_params(labelsize=14)
+
+        ax[0, 3].set_title('Delay (s)', fontdict=font)
+        ax[0, 3].imshow(delay[i, j].squeeze() - gt_delay[i, j], vmin=-1, vmax=1, cmap=map)
+        im = ax[1, 3].imshow(nlr_results['delay'] - gt_delay[i, j], vmin=-1, vmax=1, cmap=map)
+        cax = ax[2, 3].inset_axes([0, 0.82, 1, 0.1])
+        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+        bar.outline.set_color('black')
+        bar.set_label('seconds', fontdict=font)
+        bar.ax.tick_params(labelsize=14)
+
+        for i in range(4):
+            ax[2, i].set_axis_off()
+        for x in ax.flatten():
+            x.axes.xaxis.set_ticks([])
+            x.axes.yaxis.set_ticks([])
+        fig.suptitle('Parameter difference epoch: {}'.format(epoch), fontdict=font)
+        plt.tight_layout()
+        wandb.log({"parameters_diff": plt}, step=epoch)
         # plt.show()
         plt.close()

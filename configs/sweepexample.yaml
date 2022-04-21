@@ -1,0 +1,20 @@
+program: main.py
+method: grid
+parameters:
+  epochs:
+    values:
+      - 8
+  lr:
+    values:
+      - 1e-2
+      - 1e-3
+      - 0.5e-3
+  log_domain:
+    values:
+      - true
+      - false
+command:
+  - ${env}
+  - python
+  - ${program}
+  - configs\config.json

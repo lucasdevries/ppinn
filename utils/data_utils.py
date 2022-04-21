@@ -2,6 +2,7 @@ import numpy as np
 import SimpleITK as sitk
 from einops.einops import rearrange, repeat
 from scipy.ndimage import gaussian_filter, convolve
+from skimage.filters import gaussian
 import torch
 import matplotlib.pyplot as plt
 def load_data(gaussian_filter_type, sd=2.5,
@@ -121,16 +122,17 @@ def get_tensors(data_dict):
 
 
 def apply_gaussian_filter(type, array, sd):
+    # TODO try setting truncate=np.ceil(2*sigma)/sigma
     if len(array.shape) == 4:
         if type == 'spatio-temporal':
-            return gaussian_filter(array, sigma=(0, sd, sd, sd), mode='nearest')
+            return gaussian(array, sigma=(0, sd, sd, sd), mode='nearest', truncate=2.0)
         elif type == 'spatial':
-            return gaussian_filter(array, sigma=(0, 0, sd, sd), mode='nearest')
+            return gaussian(array, sigma=(0, 0, sd, sd), mode='nearest', truncate=2.0)
         else:
             raise NotImplementedError('Gaussian filter variant not implemented.')
 
     if len(array.shape) == 3:
         if type == 'spatio-temporal':
-            return gaussian_filter(array, sigma=(sd, sd, sd), mode='nearest')
+            return gaussian(array, sigma=(sd, sd, sd), mode='nearest', truncate=2.0)
         elif type == 'spatial':
-            return gaussian_filter(array, sigma=(0, sd, sd), mode='nearest')
+            return gaussian(array, sigma=(0, sd, sd), mode='nearest', truncate=2.0)

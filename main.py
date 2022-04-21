@@ -2,9 +2,7 @@ import os
 from utils import data_utils, train_utils
 from utils.config import process_config
 import wandb
-import matplotlib.pyplot as plt
 from models.ppinn_models import PPINN
-import torch
 import argparse
 def main():
     # parse the path of the json config file
@@ -39,6 +37,8 @@ def train(config):
                   std_t=data_dict['std_t'])
 
     ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
+    ppinn.plot_params_difference(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
+
     ppinn.fit(data_dict['time'],
               data_dict['aif'],
               data_dict['curves'],

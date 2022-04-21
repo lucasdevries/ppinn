@@ -27,7 +27,6 @@ def boxnlr(aif, tac, dt):
     result = result[...,144:-144, 144:-144]
     density = 1.05
     constant = (100 / density) * 0.55 / 0.75
-
     cbv = result[0]
     cbv = cbv * constant
     mtt = result[1]
