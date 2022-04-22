@@ -1,13 +1,10 @@
 program: main.py
 method: grid
 parameters:
-  cbv_slice:
+  temporal_smoothing:
     values:
-      - 0
-      - 1
-      - 2
-      - 3
-      - 4
+      - true
+      - false
 command:
   - ${env}
   - python

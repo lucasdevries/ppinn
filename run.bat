@@ -1,2 +1,2 @@
-wandb agent lucasdevries/ppinn/c9qem3bw
-wandb agent lucasdevries/ppinn/z7ftvfwl
+wandb agent lucasdevries/ppinn/l2mcy3ca
+wandb agent lucasdevries/ppinn/95woos5g

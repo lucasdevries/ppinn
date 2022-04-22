@@ -514,6 +514,14 @@ class PPINN(nn.Module):
 
         [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay, gt_delay] = [x.detach().cpu().numpy() for x in
                                                           [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay, gt_delay]]
+
+        np.mean((nlr_results['cbf'] -gt_cbf)**2)
+
+        wandb.log({"nlr_cbf_mse": np.mean((nlr_results['cbf'] - gt_cbf)**2),
+                   "nlr_cbv_mse": np.mean((nlr_results['cbv'] - gt_cbv)**2),
+                   "nlr_mtt_mse": np.mean((nlr_results['mtt'] - gt_mtt)** 2),
+                   "nlr_delay_mse": np.mean((nlr_results['delay'] - gt_delay)** 2)}, step=epoch)
+
         i, j = 0, 0
 
         font = {'family': 'serif',
@@ -527,8 +535,8 @@ class PPINN(nn.Module):
         fig, ax = plt.subplots(3, 4, figsize=(10,10))
         map = 'bwr'
         ax[0, 0].set_title('CBF', fontdict=font)
-        ax[0, 0].imshow(cbf[i, j] - gt_cbf[i, j] , vmin=-10, vmax=10, cmap=map)
-        im =ax[1, 0].imshow(nlr_results['cbf'] - gt_cbf[i, j], vmin=-10, vmax=10, cmap=map)
+        ax[0, 0].imshow(cbf[i, j] - gt_cbf[i, j] , vmin=-20, vmax=20, cmap=map)
+        im =ax[1, 0].imshow(nlr_results['cbf'] - gt_cbf[i, j], vmin=-20, vmax=20, cmap=map)
         cax = ax[2, 0].inset_axes([0, 0.82, 1, 0.1])
         bar = fig.colorbar(im, cax=cax, orientation="horizontal")
         bar.outline.set_color('black')
@@ -539,8 +547,8 @@ class PPINN(nn.Module):
         ax[2, 0].set_ylabel('GT', fontdict=font)
 
         ax[0, 1].set_title('MTT (s)', fontdict=font)
-        ax[0, 1].imshow(mtt[i, j] - gt_mtt[i, j], vmin=-2, vmax=2, cmap=map)
-        im = ax[1, 1].imshow(nlr_results['mtt'] - gt_mtt[i, j], vmin=-2, vmax=2, cmap=map)
+        ax[0, 1].imshow(mtt[i, j] - gt_mtt[i, j], vmin=-4, vmax=4, cmap=map)
+        im = ax[1, 1].imshow(nlr_results['mtt'] - gt_mtt[i, j], vmin=-4, vmax=4, cmap=map)
         cax = ax[2, 1].inset_axes([0, 0.82, 1, 0.1])
         bar = fig.colorbar(im, cax=cax, orientation="horizontal")
         bar.outline.set_color('black')
@@ -557,8 +565,8 @@ class PPINN(nn.Module):
         bar.ax.tick_params(labelsize=14)
 
         ax[0, 3].set_title('Delay (s)', fontdict=font)
-        ax[0, 3].imshow(delay[i, j].squeeze() - gt_delay[i, j], vmin=-1, vmax=1, cmap=map)
-        im = ax[1, 3].imshow(nlr_results['delay'] - gt_delay[i, j], vmin=-1, vmax=1, cmap=map)
+        ax[0, 3].imshow(delay[i, j].squeeze() - gt_delay[i, j], vmin=-1.5, vmax=1.5, cmap=map)
+        im = ax[1, 3].imshow(nlr_results['delay'] - gt_delay[i, j], vmin=-1.5, vmax=1.5, cmap=map)
         cax = ax[2, 3].inset_axes([0, 0.82, 1, 0.1])
         bar = fig.colorbar(im, cax=cax, orientation="horizontal")
         bar.outline.set_color('black')

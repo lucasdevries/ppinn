@@ -19,6 +19,7 @@
   "delay_type": "learned",
   "cbf_type": "learned",
   "mtt_type": "learned",
-  "log_domain": true
+  "log_domain": true,
+  "temporal_smoothing": false
 }
 

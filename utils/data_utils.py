@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 def load_data(gaussian_filter_type, sd=2.5,
               folder=r'data/DigitalPhantomCT',
               cbv_slice=4, simulation_method=2,
-              method='ppinn'):
+              method='ppinn', temporal_smoothing=False):
     print("Reading Dicom directory:", folder)
     reader = sitk.ImageSeriesReader()
     dicom_names = reader.GetGDCMSeriesFileNames(folder)
@@ -60,6 +60,12 @@ def load_data(gaussian_filter_type, sd=2.5,
     if gaussian_filter_type:
         perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data.copy(), sd=sd)
 
+    if temporal_smoothing:
+        k = np.array([0.25, 0.5, 0.25])
+        aif_data = convolve(aif_data, k, mode='nearest')
+        k = k.reshape(1,3,1,1)
+        perfusion_data = convolve(perfusion_data, k, mode='nearest')
+
     perfusion_values = np.empty([5, 7, 7, 4])
     cbv = [1, 2, 3, 4, 5] # in ml / 100g
     mtt_s = [24.0, 12.0, 8.0, 6.0, 4.8, 4.0, 3.42857143] # in seconds
@@ -82,6 +88,7 @@ def load_data(gaussian_filter_type, sd=2.5,
                  'time': time,
                  'curves': perfusion_data[simulation_method:simulation_method+1, cbv_slice:cbv_slice+1, :, :, :],
                  'perfusion_values': perfusion_values[simulation_method:simulation_method+1, cbv_slice:cbv_slice+1, :, :, :]}
+
     if method == 'ppinn':
         data_dict = normalize_data(data_dict)
         data_dict = get_coll_points(data_dict)
@@ -123,16 +130,18 @@ def get_tensors(data_dict):
 
 def apply_gaussian_filter(type, array, sd):
     # TODO try setting truncate=np.ceil(2*sigma)/sigma
+    truncate = np.ceil(2 * sd) / sd if sd != 0 else 0
+
     if len(array.shape) == 4:
         if type == 'spatio-temporal':
-            return gaussian(array, sigma=(0, sd, sd, sd), mode='nearest', truncate=2.0)
+            return gaussian(array, sigma=(0, sd, sd, sd), mode='nearest', truncate=truncate)
         elif type == 'spatial':
-            return gaussian(array, sigma=(0, 0, sd, sd), mode='nearest', truncate=2.0)
+            return gaussian(array, sigma=(0, 0, sd, sd), mode='nearest', truncate=truncate)
         else:
             raise NotImplementedError('Gaussian filter variant not implemented.')
 
     if len(array.shape) == 3:
         if type == 'spatio-temporal':
-            return gaussian(array, sigma=(sd, sd, sd), mode='nearest', truncate=2.0)
+            return gaussian(array, sigma=(sd, sd, sd), mode='nearest', truncate=truncate)
         elif type == 'spatial':
-            return gaussian(array, sigma=(0, sd, sd), mode='nearest', truncate=2.0)
+            return gaussian(array, sigma=(0, sd, sd), mode='nearest', truncate=truncate)
