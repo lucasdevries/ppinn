@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from models.MLP import MLP
-from utils.train_utils import AverageMeter
+from models.conv import PreConv
+from utils.train_utils import AverageMeter, weightConstraint
 from torch.utils.data import DataLoader
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
@@ -11,6 +12,7 @@ from tqdm import tqdm
 import logging
 import os
 import wandb
+
 from utils.val_utils import load_nlr_results
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 class PPINN(nn.Module):
@@ -53,7 +55,7 @@ class PPINN(nn.Module):
         self.set_delay_parameter()
         self.set_cbf_parameter()
         self.set_mtt_parameter()
-
+        self.constraint = weightConstraint()
         n_layers = config.n_layers
         n_units = config.n_units
         lr = config.lr
@@ -80,6 +82,8 @@ class PPINN(nn.Module):
             bn=bn,
             act='tanh'
         )
+        self.PreConv = PreConv()
+        self.PreConv.apply(self.constraint)
         self.current_iteration = 0
         self.set_lr(lr)
         self.set_loss_weights(loss_weights)
@@ -90,6 +94,7 @@ class PPINN(nn.Module):
 
     def forward_NNs(self, t):
         t = t.unsqueeze(-1)
+
         c_tissue = self.NN_tissue(t)
         c_aif = self.NN_aif(t)
         return c_aif, c_tissue
@@ -137,9 +142,12 @@ class PPINN(nn.Module):
         # base_opt = torch.optim.Adam(self.parameters(), lr=lr)
         # self.optimizer = SWA(base_opt, swa_start=2000, swa_freq=1)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        self.optimizer2 = torch.optim.Adam(self.PreConv.parameters(), lr=1e-3)
+
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                               milestones=self.milestones,
                                                               gamma=0.5)
+
 
     def set_device(self, device):
         self.to(device)
@@ -240,7 +248,18 @@ class PPINN(nn.Module):
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
             epoch_residual_loss = AverageMeter()
+            if self.current_iteration == 0 :
+                for param in self.PreConv.parameters():
+                    print(param.data)
+                for i in range(50, 60):
+                    plt.plot(data_curves[0, 0, 100, i, ...].detach().cpu().numpy())
+                plt.show()
 
+            if self.current_iteration % 10 == 0:
+                for i in range(50, 60):
+                    batch_cur = self.PreConv(data_curves.to(self.device))
+                    plt.plot(batch_cur[0, 0, 100, i, ...].detach().cpu().numpy())
+                plt.show()
             for batch_collopoints in collopoints_dataloader:
                 batch_time = data_time
                 batch_aif = data_aif
@@ -282,6 +301,7 @@ class PPINN(nn.Module):
                  ):
         self.train()
         self.optimizer.zero_grad()
+        self.optimizer2.zero_grad()
 
         batch_time = batch_time.to(self.device)
         batch_aif = batch_aif.to(self.device)
@@ -293,7 +313,9 @@ class PPINN(nn.Module):
         batch_boundary.requires_grad = True
         loss = torch.as_tensor(0.).to(self.device)
         loss_aif, loss_tissue, loss_residual = 999, 999, 999
-
+        for param in self.PreConv.parameters():
+            for ix, par in enumerate(param.data):
+                param.data[ix] = torch.exp(par)
         if self.current_iteration < 0:
             if self.lw_res:
                 # compute residual loss
@@ -308,7 +330,7 @@ class PPINN(nn.Module):
                     c_aif, c_tissue = self.forward_NNs(batch_time)
                 else:
                     c_aif, c_tissue = self.forward_NNs(batch_time)
-                loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
+                loss_aif, loss_tissue = self.__loss_data(batch_aif, self.PreConv(batch_curves), c_aif, c_tissue)
                 loss += self.lw_data * (loss_aif + loss_tissue)
             if self.lw_res:
                 # compute residual loss
@@ -323,6 +345,15 @@ class PPINN(nn.Module):
 
         loss.backward()
         self.optimizer.step()
+        self.optimizer2.step()
+        # self.PreConv.apply(self.constraint)
+        wandb.watch(self.PreConv)
+        for param in self.PreConv.parameters():
+            for ix, par in enumerate(param.data):
+                param.data[ix] = torch.exp(par) / torch.sum(torch.exp(par))
+        if self.current_iteration % 10 == 0:
+            for param in self.PreConv.parameters():
+                print(param.data)
         return loss_aif, loss_tissue, loss_residual
 
     def validate(self):

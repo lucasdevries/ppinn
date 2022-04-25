@@ -36,3 +36,14 @@ class AverageMeter:
     @property
     def val(self):
         return self.value
+
+
+class weightConstraint(object):
+    def __init__(self):
+        pass
+
+    def __call__(self, module):
+        if hasattr(module, 'weight'):
+            w = module.weight.data
+            w = w.clamp(0, 10)
+            module.weight.data = w

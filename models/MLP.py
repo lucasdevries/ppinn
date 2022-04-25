@@ -65,6 +65,7 @@ class MLP(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+
         # x = x.repeat(*self.shape_in, 1).unsqueeze(-1)
         x = self.net(x)
         # if not self.aif:
