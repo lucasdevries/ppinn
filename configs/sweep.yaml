@@ -1,14 +1,10 @@
 program: main.py
 method: grid
 parameters:
-  sd:
+  batch_size:
     values:
-      - 0
-      - 1
-      - 2
-      - 3
-      - 4
-      - 5
+      - 8
+      - 16
 command:
   - ${env}
   - python

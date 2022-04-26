@@ -2,10 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from models.MLP import MLP
-from models.conv import PreConv
 from utils.train_utils import AverageMeter, weightConstraint
 from torch.utils.data import DataLoader
-from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -40,7 +38,7 @@ class PPINN(nn.Module):
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
         self.optimizer = None
         self.scheduler = None
-        self.milestones = [int(0.5*config.epochs), int(0.8 * config.epochs)]
+        self.milestones = [500]
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
@@ -82,8 +80,6 @@ class PPINN(nn.Module):
             bn=bn,
             act='tanh'
         )
-        self.PreConv = PreConv()
-        self.PreConv.apply(self.constraint)
         self.current_iteration = 0
         self.set_lr(lr)
         self.set_loss_weights(loss_weights)
@@ -139,11 +135,7 @@ class PPINN(nn.Module):
         self.lw_bc.to(self.device)
 
     def set_lr(self, lr):
-        # base_opt = torch.optim.Adam(self.parameters(), lr=lr)
-        # self.optimizer = SWA(base_opt, swa_start=2000, swa_freq=1)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        self.optimizer2 = torch.optim.Adam(self.PreConv.parameters(), lr=1e-3)
-
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                               milestones=self.milestones,
                                                               gamma=0.5)
@@ -248,18 +240,6 @@ class PPINN(nn.Module):
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
             epoch_residual_loss = AverageMeter()
-            if self.current_iteration == 0 :
-                for param in self.PreConv.parameters():
-                    print(param.data)
-                for i in range(50, 60):
-                    plt.plot(data_curves[0, 0, 100, i, ...].detach().cpu().numpy())
-                plt.show()
-
-            if self.current_iteration % 10 == 0:
-                for i in range(50, 60):
-                    batch_cur = self.PreConv(data_curves.to(self.device))
-                    plt.plot(batch_cur[0, 0, 100, i, ...].detach().cpu().numpy())
-                plt.show()
             for batch_collopoints in collopoints_dataloader:
                 batch_time = data_time
                 batch_aif = data_aif
@@ -301,7 +281,6 @@ class PPINN(nn.Module):
                  ):
         self.train()
         self.optimizer.zero_grad()
-        self.optimizer2.zero_grad()
 
         batch_time = batch_time.to(self.device)
         batch_aif = batch_aif.to(self.device)
@@ -313,47 +292,25 @@ class PPINN(nn.Module):
         batch_boundary.requires_grad = True
         loss = torch.as_tensor(0.).to(self.device)
         loss_aif, loss_tissue, loss_residual = 999, 999, 999
-        for param in self.PreConv.parameters():
-            for ix, par in enumerate(param.data):
-                param.data[ix] = torch.exp(par)
-        if self.current_iteration < 0:
-            if self.lw_res:
-                # compute residual loss
-                c_aif, c_tissue, residual = self.forward_complete(batch_collopoints)
-                loss_residual = self.__loss_residual(residual)
-                loss += self.lw_res * loss_residual
-                # loss_aif, loss_tissue = 0, 0
+
+        if self.lw_data:
+            # compute data loss
+            c_aif, c_tissue = self.forward_NNs(batch_time)
+            loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
+            loss += self.lw_data * (loss_aif + loss_tissue)
+        if self.lw_res:
+            # compute residual loss
+            c_aif, c_tissue, residual = self.forward_complete(batch_collopoints)
+            loss_residual = self.__loss_residual(residual)
+            loss += self.lw_res * loss_residual
         else:
-            if self.lw_data:
-                # compute data loss
-                if self.current_iteration > 6000:
-                    c_aif, c_tissue = self.forward_NNs(batch_time)
-                else:
-                    c_aif, c_tissue = self.forward_NNs(batch_time)
-                loss_aif, loss_tissue = self.__loss_data(batch_aif, self.PreConv(batch_curves), c_aif, c_tissue)
-                loss += self.lw_data * (loss_aif + loss_tissue)
-            if self.lw_res:
-                # compute residual loss
-                c_aif, c_tissue, residual = self.forward_complete(batch_collopoints)
-                loss_residual = self.__loss_residual(residual)
-                loss += self.lw_res * loss_residual
-            else:
-                raise NotImplementedError('No loss calculated... all weights at zero?')
+            raise NotImplementedError('No loss calculated... all weights at zero?')
 
         if np.isnan(float(loss.item())):
             raise ValueError('Loss is nan during training...')
 
         loss.backward()
         self.optimizer.step()
-        self.optimizer2.step()
-        # self.PreConv.apply(self.constraint)
-        wandb.watch(self.PreConv)
-        for param in self.PreConv.parameters():
-            for ix, par in enumerate(param.data):
-                param.data[ix] = torch.exp(par) / torch.sum(torch.exp(par))
-        if self.current_iteration % 10 == 0:
-            for param in self.PreConv.parameters():
-                print(param.data)
         return loss_aif, loss_tissue, loss_residual
 
     def validate(self):

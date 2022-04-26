@@ -4,11 +4,13 @@ from einops.einops import rearrange, repeat
 from scipy.ndimage import gaussian_filter, convolve
 from skimage.filters import gaussian
 import torch
+import os
 import matplotlib.pyplot as plt
+import scipy.io
 def load_data(gaussian_filter_type, sd=2.5,
               folder=r'data/DigitalPhantomCT',
               cbv_slice=4, simulation_method=2,
-              method='ppinn', temporal_smoothing=False):
+              method='ppinn', temporal_smoothing=False, save_nifti=True):
     print("Reading Dicom directory:", folder)
     reader = sitk.ImageSeriesReader()
     dicom_names = reader.GetGDCMSeriesFileNames(folder)
@@ -45,20 +47,31 @@ def load_data(gaussian_filter_type, sd=2.5,
         cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
         ratio = cumsum_vof / cumsum_aif
         aif_data = aif_wo_baseline * ratio + aif_baseline
-    # print(list(aif_data))
 
     simulated_data_size = 32 * 7
     scan_center = image_data.shape[-1]//2
     simulated_data_start = scan_center - simulated_data_size//2
     simulated_data_end = scan_center + simulated_data_size//2
+    if gaussian_filter_type:
+        perfusion_data = image_data[1:,:,
+                         simulated_data_start:simulated_data_end,
+                         simulated_data_start:simulated_data_end]
+        perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data.copy(), sd=sd)
 
-    perfusion_data = image_data[1:,:,
-                     simulated_data_start:simulated_data_end,
-                     simulated_data_start:simulated_data_end]
+    else:
+        perfusion_data = image_data[1:,:,
+                         simulated_data_start:simulated_data_end,
+                         simulated_data_start:simulated_data_end]
     perfusion_data = perfusion_data.astype(np.float32)
 
-    if gaussian_filter_type:
-        perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data.copy(), sd=sd)
+
+    if save_nifti:
+        scipy.io.savemat(os.path.join('data', 'aif_data.mat'), {'aif':aif_data})
+        perfusion_data_nii = rearrange(perfusion_data, 'c t h w -> h w c t')
+        scipy.io.savemat(os.path.join('data', 'image_data_sd_{}.mat'.format(sd)), {'image_data': perfusion_data_nii})
+        perfusion_data_nii = sitk.GetImageFromArray(perfusion_data_nii)
+        sitk.WriteImage(perfusion_data_nii, os.path.join('data', 'image_data_sd_{}.nii'.format(sd)))
+
 
     if temporal_smoothing:
         k = np.array([0.25, 0.5, 0.25])
@@ -129,9 +142,7 @@ def get_tensors(data_dict):
 
 
 def apply_gaussian_filter(type, array, sd):
-    # TODO try setting truncate=np.ceil(2*sigma)/sigma
     truncate = np.ceil(2 * sd) / sd if sd != 0 else 0
-
     if len(array.shape) == 4:
         if type == 'spatio-temporal':
             return gaussian(array, sigma=(0, sd, sd, sd), mode='nearest', truncate=truncate)

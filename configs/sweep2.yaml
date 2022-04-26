@@ -1,10 +1,13 @@
 program: main.py
 method: grid
 parameters:
-  temporal_smoothing:
+  lw_res:
     values:
-      - true
-      - false
+      - 1
+      - 5
+      - 10
+      - 25
+      - 100
 command:
   - ${env}
   - python
