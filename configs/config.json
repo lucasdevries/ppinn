@@ -3,6 +3,7 @@
   "gpu_device": 0,
   "seed": 11,
   "wandb_folder": "./wandb/",
+  "wandb" :true,
   "cbv_slice": 4,
   "simulation_method": 2,
   "n_layers": 2,
@@ -13,13 +14,14 @@
   "bn" : false,
   "batch_size": 16,
   "epochs": 1000,
-  "gaussian_filter_type": "spatial",
+  "filter_type": "gauss_spatial",
   "sd": 2.5,
-  "plot_params_every": 100,
+  "plot_params_every": 10,
   "delay_type": "learned",
   "cbf_type": "learned",
   "mtt_type": "learned",
   "log_domain": true,
-  "temporal_smoothing": false
+  "temporal_smoothing": false,
+  "baseline_zero": false
 }
 

@@ -3,8 +3,11 @@ method: grid
 parameters:
   batch_size:
     values:
-      - 8
-      - 16
+      - 32
+  baseline_zero:
+    values:
+      - true
+      - false
 command:
   - ${env}
   - python
