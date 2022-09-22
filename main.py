@@ -4,7 +4,7 @@ from utils.config import process_config
 import wandb
 from models.ppinn_models import PPINN
 from models.ppinn_model_isles import PPINN_isles
-
+import numpy as np
 import argparse
 def main():
     # parse the path of the json config file
@@ -56,31 +56,50 @@ def train(config):
     ppinn.save_parameters()
 
 def train_isles(config):
-    data_dict = data_utils.load_data_ISLES(filter_type=config.filter_type,
-                                     sd=config.sd,
-                                     temporal_smoothing=config.temporal_smoothing,
-                                     baseline_zero=config.baseline_zero)
-    slice = 6
-    shape_in = data_dict['curves'][slice:slice+1].shape[:-1]
-    ppinn = PPINN_isles(config,
-                  shape_in=shape_in,
-                  perfusion_values=data_dict['perfusion_values'],
-                  n_inputs=1,
-                  std_t=data_dict['std_t'])
+    folder = 'TRAINING' if config.mode == 'train' else 'TESTING'
+    cases = os.listdir(r'data/ISLES2018/{}'.format(folder))
+    for case in cases[10:]:
+        os.makedirs(os.path.join(wandb.run.dir, 'results',case))
+        data_dict = data_utils.load_data_ISLES(filter_type=config.filter_type,
+                                               sd=config.sd,
+                                               temporal_smoothing=config.temporal_smoothing,
+                                               baseline_zero=config.baseline_zero,
+                                               mode=config.mode,
+                                               case=case)
+        shape_in = data_dict['curves'][0:1].shape[:-1]
+        scan_dimensions = data_dict['curves'].shape[:-1]
+        slices = scan_dimensions[0]
+        cbf_results = np.zeros([*scan_dimensions], dtype=np.float32)
+        cbv_results = np.zeros([*scan_dimensions], dtype=np.float32)
+        mtt_results = np.zeros([*scan_dimensions], dtype=np.float32)
+        delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
+        tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-    ppinn.plot_params(slice=slice, epoch=0, brainmask=data_dict['brainmask'])
+        for slice in tqdm(range(slices)):
+            ppinn = PPINN_isles(config,
+                                shape_in=shape_in,
+                                perfusion_values=data_dict['perfusion_values'],
+                                n_inputs=1,
+                                std_t=data_dict['std_t'])
+            result_dict = ppinn.fit(slice,
+                      data_dict,
+                      batch_size=config.batch_size,
+                      epochs=int(config.epochs))
+            cbf_results[slice, ...] = result_dict['cbf'].cpu().detach().numpy()
+            cbv_results[slice, ...] = result_dict['cbv'].cpu().detach().numpy()
+            mtt_results[slice, ...] = result_dict['mtt'].cpu().detach().numpy()
+            delay_results[slice, ...] = result_dict['delay'].cpu().detach().numpy()
+            tmax_results[slice, ...] = result_dict['tmax'].cpu().detach().numpy()
 
+            visualize(slice, case, data_dict['perfusion_values'][slice], result_dict)
 
+        data_utils.save_perfusion_parameters(config,
+                                             case,
+                                             cbf_results,
+                                             cbv_results,
+                                             mtt_results,
+                                             delay_results,
+                                             tmax_results)
 
-    ppinn.fit(slice,
-              data_dict['time'],
-              data_dict['aif'],
-              data_dict['curves'],
-              data_dict['coll_points'],
-              data_dict['bound'],
-              batch_size=config.batch_size,
-              epochs=config.epochs,
-              brainmask=data_dict['brainmask'])
-    ppinn.save_parameters()
 if __name__ == "__main__":
     main()
