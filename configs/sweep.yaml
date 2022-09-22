@@ -1,13 +1,21 @@
 program: main.py
 method: grid
 parameters:
-  batch_size:
+  cbv_ml:
     values:
-      - 32
-  baseline_zero:
+      - 5
+      - 1
+      - 2
+      - 3
+      - 4
+  drop_edges:
     values:
       - true
       - false
+  drop_unphysical:
+    values:
+      - false
+      - true
 command:
   - ${env}
   - python

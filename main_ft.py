@@ -9,6 +9,10 @@ import SimpleITK as sitk
 
 
 def train():
+
+
+
+
     data_dict = data_utils.load_data(gaussian_filter_type='spatial', sd=2.5,
                                      cbv_slice=4, simulation_method=2, method='nlr')
     shape_in = data_dict['perfusion_values'].shape[:-1]  # (3, 5, 224, 224)

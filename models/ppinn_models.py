@@ -13,6 +13,8 @@ import wandb
 
 from utils.val_utils import load_nlr_results
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+
 class PPINN(nn.Module):
     def __init__(self,
                  config,
@@ -81,12 +83,11 @@ class PPINN(nn.Module):
             act='tanh'
         )
         self.current_iteration = 0
-        self.set_lr(lr)
+        self.set_lr(self.config.optimizer, lr)
         self.set_loss_weights(loss_weights)
         self.set_params_to_domain()
         self.set_device(self.device)
         self.float()
-
 
     def forward_NNs(self, t):
         t = t.unsqueeze(-1)
@@ -134,12 +135,12 @@ class PPINN(nn.Module):
         self.lw_res.to(self.device)
         self.lw_bc.to(self.device)
 
-    def set_lr(self, lr):
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+    def set_lr(self, optimizer, lr):
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr) if optimizer == 'Adam' else torch.optim.SGD(
+            self.parameters(), lr=lr)
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                               milestones=self.milestones,
                                                               gamma=0.5)
-
 
     def set_device(self, device):
         self.to(device)
@@ -162,6 +163,7 @@ class PPINN(nn.Module):
             self.flow_t_delay = self.flow_t_delay.to(self.device)
         else:
             raise NotImplementedError('Delay type not implemented...')
+
     def set_cbf_parameter(self):
         low = 0
         high = 100 / (69.84 * 60)
@@ -169,7 +171,7 @@ class PPINN(nn.Module):
         constant = (100 / density) * 0.55 / 0.75
         if self.cbf_type == 'learned':
             self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
-            torch.nn.init.uniform_(self.flow_cbf, 0.5*high, high)
+            torch.nn.init.uniform_(self.flow_cbf, 0.5 * high, high)
         elif self.cbf_type == 'fixed':
             if self.log_domain:
                 self.flow_cbf = torch.log(self.perfusion_values[..., 3] / (constant * 60))
@@ -186,13 +188,14 @@ class PPINN(nn.Module):
             torch.nn.init.uniform_(self.flow_mtt, 0.75, 1)
         elif self.mtt_type == 'fixed':
             if self.log_domain:
-                self.flow_mtt = torch.log(self.perfusion_values[..., 2]*60 / 24)
+                self.flow_mtt = torch.log(self.perfusion_values[..., 2] * 60 / 24)
             else:
-                self.flow_mtt = self.perfusion_values[..., 2]*60 / 24
+                self.flow_mtt = self.perfusion_values[..., 2] * 60 / 24
             self.flow_mtt = self.flow_mtt.view(*self.flow_cbf.shape, 1)
             self.flow_mtt = self.flow_mtt.to(self.device)
         else:
             raise NotImplementedError('Delay type not implemented...')
+
     def get_ode_params(self):
         if self.log_domain:
             return [torch.exp(self.flow_cbf), 24 * torch.exp(self.flow_mtt), 3 * torch.exp(self.flow_t_delay)]
@@ -251,10 +254,10 @@ class PPINN(nn.Module):
                 batch_curves = data_curves
                 batch_boundary = data_boundary
                 loss_aif, loss_tissue, loss_residual = self.optimize(batch_time,
-                                                         batch_aif,
-                                                         batch_curves,
-                                                         batch_boundary,
-                                                         batch_collopoints)
+                                                                     batch_aif,
+                                                                     batch_curves,
+                                                                     batch_boundary,
+                                                                     batch_collopoints)
 
                 epoch_aif_loss.update(loss_aif.item(), len(batch_time))
                 epoch_tissue_loss.update(loss_tissue.item(), len(batch_time))
@@ -273,8 +276,11 @@ class PPINN(nn.Module):
             wandb.log(metrics, step=self.current_iteration)
 
             if ep % self.config.plot_params_every == 0:
-                self.plot_params(0, 0, gt, ep)
-                self.plot_params_difference(0, 0, gt, ep)
+                try:
+                    self.plot_params(0, 0, gt, ep)
+                    self.plot_params_difference(0, 0, gt, ep)
+                except:
+                    continue
             self.current_iteration += 1
 
     def optimize(self,
@@ -317,6 +323,15 @@ class PPINN(nn.Module):
         loss.backward()
         self.optimizer.step()
         return loss_aif, loss_tissue, loss_residual
+
+    def get_results(self):
+        cbf = self.get_cbf(seconds=False).squeeze().cpu().detach().numpy()
+        mtt = self.get_mtt(seconds=True).squeeze().cpu().detach().numpy()
+        mtt_min = self.get_mtt(seconds=False).squeeze().cpu().detach().numpy()
+        delay = self.get_delay(seconds=True).squeeze().cpu().detach().numpy()
+        cbv = cbf * mtt_min
+        tmax = delay + 0.5 * mtt
+        return {'cbf': cbf, 'cbv': cbv, 'mtt': mtt, 'delay': delay, 'tmax': tmax}
 
     def validate(self):
 
@@ -415,10 +430,9 @@ class PPINN(nn.Module):
         gt_mtt = perfusion_values[..., 2] * 60
         gt_cbf = perfusion_values[..., 3]
 
-        nlr_results = load_nlr_results()
+        nlr_results = load_nlr_results(cbv_ml=self.config.cbv_ml, sd=self.config.sd)
 
-
-        cbf_min, cbf_max = 0.9*torch.min(gt_cbf).item(), 1.1*torch.max(gt_cbf).item()
+        cbf_min, cbf_max = 0.9 * torch.min(gt_cbf).item(), 1.1 * torch.max(gt_cbf).item()
 
         [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay] = [x.detach().cpu().numpy() for x in
                                                           [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay]]
@@ -432,7 +446,7 @@ class PPINN(nn.Module):
         plt.rcParams["font.family"] = "serif"
         plt.rcParams["axes.linewidth"] = 1.5
         plt.rcParams["figure.dpi"] = 150
-        fig, ax = plt.subplots(4, 4, figsize=(10,12))
+        fig, ax = plt.subplots(4, 4, figsize=(10, 12))
 
         ax[0, 0].set_title('CBF', fontdict=font)
         ax[0, 0].imshow(cbf[i, j], vmin=cbf_min, vmax=cbf_max, cmap='jet')
@@ -448,9 +462,9 @@ class PPINN(nn.Module):
         ax[2, 0].set_ylabel('GT', fontdict=font)
 
         ax[0, 1].set_title('MTT (s)', fontdict=font)
-        ax[0, 1].imshow(mtt[i, j], vmin=0.01, vmax=1.1*24, cmap='jet')
-        ax[1, 1].imshow(nlr_results['mtt'], vmin=0.01, vmax=1.1*24, cmap='jet')
-        im = ax[2, 1].imshow(gt_mtt[i, j], vmin=0.01, vmax=1.1*24, cmap='jet')
+        ax[0, 1].imshow(mtt[i, j], vmin=0.01, vmax=1.1 * 24, cmap='jet')
+        ax[1, 1].imshow(nlr_results['mtt'], vmin=0.01, vmax=1.1 * 24, cmap='jet')
+        im = ax[2, 1].imshow(gt_mtt[i, j], vmin=0.01, vmax=1.1 * 24, cmap='jet')
         cax = ax[3, 1].inset_axes([0, 0.82, 1, 0.1])
         bar = fig.colorbar(im, cax=cax, orientation="horizontal")
         bar.outline.set_color('black')
@@ -501,19 +515,13 @@ class PPINN(nn.Module):
         gt_mtt = perfusion_values[..., 2] * 60
         gt_cbf = perfusion_values[..., 3]
 
-        nlr_results = load_nlr_results()
+        nlr_results = load_nlr_results(cbv_ml=self.config.cbv_ml, sd=self.config.sd)
 
-        cbf_min, cbf_max = 0.9*torch.min(gt_cbf).item(), 1.1*torch.max(gt_cbf).item()
+        cbf_min, cbf_max = 0.9 * torch.min(gt_cbf).item(), 1.1 * torch.max(gt_cbf).item()
 
         [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay, gt_delay] = [x.detach().cpu().numpy() for x in
-                                                          [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay, gt_delay]]
-
-        np.mean((nlr_results['cbf'] -gt_cbf)**2)
-
-        wandb.log({"nlr_cbf_mse": np.mean((nlr_results['cbf'] - gt_cbf)**2),
-                   "nlr_cbv_mse": np.mean((nlr_results['cbv'] - gt_cbv)**2),
-                   "nlr_mtt_mse": np.mean((nlr_results['mtt'] - gt_mtt)** 2),
-                   "nlr_delay_mse": np.mean((nlr_results['delay'] - gt_delay)** 2)}, step=epoch)
+                                                                    [cbf, mtt, cbv, gt_cbf, gt_mtt, gt_cbv, delay,
+                                                                     gt_delay]]
 
         i, j = 0, 0
 
@@ -525,11 +533,11 @@ class PPINN(nn.Module):
         plt.rcParams["font.family"] = "serif"
         plt.rcParams["axes.linewidth"] = 1.5
         plt.rcParams["figure.dpi"] = 150
-        fig, ax = plt.subplots(3, 4, figsize=(10,10))
+        fig, ax = plt.subplots(3, 4, figsize=(10, 10))
         map = 'bwr'
         ax[0, 0].set_title('CBF', fontdict=font)
-        ax[0, 0].imshow(cbf[i, j] - gt_cbf[i, j] , vmin=-20, vmax=20, cmap=map)
-        im =ax[1, 0].imshow(nlr_results['cbf'] - gt_cbf[i, j], vmin=-20, vmax=20, cmap=map)
+        ax[0, 0].imshow(cbf[i, j] - gt_cbf[i, j], vmin=-20, vmax=20, cmap=map)
+        im = ax[1, 0].imshow(nlr_results['cbf'] - gt_cbf[i, j], vmin=-20, vmax=20, cmap=map)
         cax = ax[2, 0].inset_axes([0, 0.82, 1, 0.1])
         bar = fig.colorbar(im, cax=cax, orientation="horizontal")
         bar.outline.set_color('black')

@@ -10,7 +10,7 @@ from tqdm import tqdm
 import logging
 import os
 import wandb
-
+import SimpleITK as sitk
 from utils.val_utils import load_nlr_results
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 class PPINN_isles(nn.Module):
@@ -89,6 +89,7 @@ class PPINN_isles(nn.Module):
 
 
     def forward_NNs(self, t):
+
         t = t.unsqueeze(-1)
 
         c_tissue = self.NN_tissue(t)
@@ -205,23 +206,17 @@ class PPINN_isles(nn.Module):
 
     def fit(self,
             slice,
-            data_time,
-            data_aif,
-            data_curves,
-            data_collopoints,
-            data_boundary,
+            data_dict,
             batch_size,
-            epochs,
-            brainmask):
-
-        data_time = data_time.to(self.device)
-        data_aif = data_aif.to(self.device)
-        data_curves = data_curves[slice:slice+1].to(self.device)
-        data_collopoints = data_collopoints.to(self.device)
-        data_boundary = data_boundary.to(self.device)
+            epochs):
+        data_time = data_dict['time'].to(self.device)
+        data_aif = data_dict['aif'].to(self.device)
+        data_curves = data_dict['curves'][slice:slice+1].to(self.device)
+        data_collopoints = data_dict['coll_points'].to(self.device)
+        data_boundary = data_dict['bound'].to(self.device)
         collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True, drop_last=True)
-
-        for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
+        brainmask = data_dict['brainmask']
+        for ep in range(self.current_iteration + 1, self.current_iteration + epochs + 1):
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
             epoch_residual_loss = AverageMeter()
@@ -230,7 +225,6 @@ class PPINN_isles(nn.Module):
                 batch_aif = data_aif
                 batch_curves = data_curves
                 batch_boundary = data_boundary
-
                 loss_aif, loss_tissue, loss_residual = self.optimize(batch_time,
                                                          batch_aif,
                                                          batch_curves,
@@ -248,12 +242,44 @@ class PPINN_isles(nn.Module):
                        "residual_loss": epoch_residual_loss.avg,
                        "lr": self.optimizer.param_groups[0]['lr'],
                        }
+            if ep in [3,10, 20, 30, 40, 50, 100]:
+                data_time_inf = data_dict['time_inference_highres'].to(self.device)
+                aif_inf, tac_inf = self.forward_NNs(data_time_inf)
+                colors = ['k', 'r', 'b', 'g']
+                for i in range(4):
+                    plt.plot(data_dict['time_inference_highres'], tac_inf[0,128+i,128].cpu().detach().numpy(), c=colors[i])
+                    plt.scatter(data_dict['time'], data_dict['curves'][slice,128+i,128].cpu().detach().numpy(), c=colors[i])
+                plt.show()
+                np.save(f'aif_estimates_{ep}.npy', aif_inf.cpu().detach().numpy())
+                np.save(f'tacs_estimates_{ep}.npy', tac_inf.cpu().detach().numpy())
+                np.save('tacs.npy', data_dict['curves'][slice].cpu().detach().numpy())
+                np.save('aif.npy', data_dict['aif'].cpu().detach().numpy())
 
-            wandb.log(metrics, step=self.current_iteration)
+                sitk.WriteImage(sitk.GetImageFromArray(tac_inf[0].cpu().detach().numpy()),f'estimates_{ep}.nii')
+                sitk.WriteImage(sitk.GetImageFromArray(data_dict['curves'][slice].cpu().detach().numpy()),f'curves{ep}.nii')
 
-            if ep % self.config.plot_params_every == 0:
-                self.plot_params(slice, ep, brainmask)
+
+
+
+
+            # wandb.log(metrics, step=self.current_iteration)
+
+            # if ep % self.config.plot_params_every == 0:
+            #     self.plot_params(slice, ep, brainmask)
             self.current_iteration += 1
+
+        brainmask = brainmask[slice:slice+1].to(self.device)
+        cbf = brainmask * self.get_cbf(seconds=False).squeeze(-1)
+        mtt = brainmask * self.get_mtt(seconds=True).squeeze(-1)
+        mtt_min = brainmask * self.get_mtt(seconds=False).squeeze(-1)
+        delay = brainmask * self.get_delay(seconds=True).squeeze(-1).squeeze(-1)
+        cbv = cbf * mtt_min
+        tmax = delay + 0.5*mtt
+        return {'cbf': cbf,
+                'cbv': cbv,
+                'mtt': mtt,
+                'delay': delay,
+                'tmax': tmax}
     def optimize(self,
                  batch_time,
                  batch_aif,
@@ -289,6 +315,7 @@ class PPINN_isles(nn.Module):
             raise NotImplementedError('No loss calculated... all weights at zero?')
 
         if np.isnan(float(loss.item())):
+            print(loss_aif, loss_tissue, loss_residual)
             raise ValueError('Loss is nan during training...')
 
         loss.backward()
@@ -317,6 +344,7 @@ class PPINN_isles(nn.Module):
         aif = aif.expand(*c_aif.shape)
         # solution loss
         loss_aif = F.mse_loss(aif, c_aif)
+
         loss_tissue = F.mse_loss(curves, c_tissue)
         # TODO maybe implement derivative loss here
         return loss_aif, loss_tissue
@@ -402,7 +430,7 @@ class PPINN_isles(nn.Module):
         bar.ax.tick_params(labelsize=14)
 
 
-        ax[0, 1].set_title('MTT (s)', fontdict=font)
+        ax[0, 1].set_title('MTT', fontdict=font)
         im = ax[0, 1].imshow(mtt[i], vmin=0.01, vmax=1.1 * 24, cmap='jet')
         cax = ax[0, 1].inset_axes([0, -0.2, 1, 0.1])
         bar = fig.colorbar(im, cax=cax, orientation="horizontal")
@@ -417,7 +445,7 @@ class PPINN_isles(nn.Module):
         bar.set_label('seconds', fontdict=font)
         bar.ax.tick_params(labelsize=14)
 
-        ax[0, 2].set_title('CBV (ml/100g)', fontdict=font)
+        ax[0, 2].set_title('CBV', fontdict=font)
         im = ax[0, 2].imshow(cbv[i], vmin=0.01, vmax=7, cmap='jet')
         cax = ax[0, 2].inset_axes([0, -0.2, 1, 0.1])
         bar = fig.colorbar(im, cax=cax, orientation="horizontal")
@@ -432,7 +460,7 @@ class PPINN_isles(nn.Module):
         bar.set_label('ml/100g', fontdict=font)
         bar.ax.tick_params(labelsize=14)
 
-        ax[0, 3].set_title('Delay (s)', fontdict=font)
+        ax[0, 3].set_title('Delay', fontdict=font)
         im = ax[0, 3].imshow(delay[i], vmin=0.01, vmax=3.5, cmap='jet')
         im = ax[1, 3].imshow(isles_gt_core[i], vmin=0.01, vmax=2, cmap='jet')
         cax = ax[1, 3].inset_axes([0, -0.2, 1, 0.1])
@@ -448,6 +476,6 @@ class PPINN_isles(nn.Module):
             x.axes.yaxis.set_ticks([])
         fig.suptitle('Parameter estimation epoch: {}'.format(epoch), fontdict=font)
         plt.tight_layout()
-        wandb.log({"parameters": plt}, step=epoch)
+        # wandb.log({"parameters": plt}, step=epoch)
         plt.show()
         plt.close()

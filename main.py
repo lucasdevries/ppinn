@@ -6,6 +6,10 @@ from models.ppinn_models import PPINN
 from models.ppinn_model_isles import PPINN_isles
 import numpy as np
 import argparse
+from tqdm import tqdm
+from utils.val_utils import visualize, load_sygnovia_results, load_nlr_results, load_phantom_gt
+from utils.val_utils import log_software_results, plot_results, drop_edges, drop_unphysical
+import matplotlib.pyplot as plt
 def main():
     # parse the path of the json config file
     arg_parser = argparse.ArgumentParser(description="")
@@ -26,12 +30,24 @@ def main():
     train_utils.set_seed(config['seed'])
     config['run_name'] = wandb.run.name
     config['run_id'] = wandb.run.id
-    train_isles(config)
+    os.makedirs(os.path.join(wandb.run.dir, 'results'))
+
+    results = {
+        'gt': load_phantom_gt(cbv_ml=config.cbv_ml),
+        'sygnovia': load_sygnovia_results(cbv_ml=config.cbv_ml, sd=config.sd),
+        'nlr': load_nlr_results(cbv_ml=config.cbv_ml, sd=config.sd),
+        'ppinn': train(config)
+    }
+
+    results = drop_edges(results) if config.drop_edges else results
+    results = drop_unphysical(results) if config.drop_unphysical else results
+    plot_results(results)
+    log_software_results(results, config.cbv_ml)
 
 def train(config):
     data_dict = data_utils.load_data(gaussian_filter_type=config.filter_type,
                                      sd=config.sd,
-                                     cbv_slice=config.cbv_slice,
+                                     cbv_ml=config.cbv_ml,
                                      simulation_method=config.simulation_method,
                                      temporal_smoothing=config.temporal_smoothing,
                                      baseline_zero=config.baseline_zero)
@@ -41,7 +57,6 @@ def train(config):
                   perfusion_values=data_dict['perfusion_values'],
                   n_inputs=1,
                   std_t=data_dict['std_t'])
-
     ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
     ppinn.plot_params_difference(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
 
@@ -54,7 +69,8 @@ def train(config):
               batch_size=config.batch_size,
               epochs=config.epochs)
     ppinn.save_parameters()
-
+    ppinn_results = ppinn.get_results()
+    return ppinn_results
 def train_isles(config):
     folder = 'TRAINING' if config.mode == 'train' else 'TESTING'
     cases = os.listdir(r'data/ISLES2018/{}'.format(folder))
