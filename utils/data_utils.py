@@ -80,9 +80,9 @@ def load_data(gaussian_filter_type, sd=2.5,
     if save_nifti:
         scipy.io.savemat(os.path.join('data', 'aif_data.mat'), {'aif': aif_data})
         perfusion_data_nii = rearrange(perfusion_data, 'c t h w -> h w c t')
-        scipy.io.savemat(os.path.join('data', 'image_data_sd_{}.mat'.format(sd)), {'image_data': perfusion_data_nii})
+        # scipy.io.savemat(os.path.join('data', 'image_data_sd_{}.mat'.format(sd)), {'image_data': perfusion_data_nii})
         perfusion_data_nii = sitk.GetImageFromArray(perfusion_data_nii)
-        sitk.WriteImage(perfusion_data_nii, os.path.join('data', 'image_data_sd_{}.nii'.format(sd)))
+        sitk.WriteImage(perfusion_data_nii, os.path.join('data', 'NLR_image_data_sd_{}.nii'.format(sd)))
 
     if temporal_smoothing:
         k = np.array([0.25, 0.5, 0.25])

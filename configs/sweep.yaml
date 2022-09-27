@@ -1,21 +1,18 @@
 program: main.py
 method: grid
 parameters:
+  sd:
+    values:
+      - 0
+      - 1
+      - 2
   cbv_ml:
     values:
-      - 5
       - 1
       - 2
       - 3
       - 4
-  drop_edges:
-    values:
-      - true
-      - false
-  drop_unphysical:
-    values:
-      - false
-      - true
+      - 5
 command:
   - ${env}
   - python

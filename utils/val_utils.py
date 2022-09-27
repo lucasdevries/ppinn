@@ -24,32 +24,57 @@ def load_nlr_results(cbv_ml=5, sd=2):
             'delay': delay,
             'tmax': tmax}
 
+# def read_dcm(folder):
+#     reader = sitk.ImageSeriesReader()
+#     dicom_names = reader.GetGDCMSeriesFileNames(folder)
+#     reader.SetFileNames(dicom_names)
+#     image = reader.Execute()
+#     return image
 def read_dcm(folder):
     reader = sitk.ImageSeriesReader()
     dicom_names = reader.GetGDCMSeriesFileNames(folder)
-    reader.SetFileNames(dicom_names)
-    image = reader.Execute()
-    return image
-
+    series_dic = {series_id: reader.GetGDCMSeriesFileNames(folder, series_id) for series_id in
+                  reader.GetGDCMSeriesIDs(folder)}
+    series_names = ['mip', 'cbf', 'cbv', 'mtt', 'ttd', 'delay', 'tmax']
+    data_dict = {}
+    for name, id in zip(series_names, series_dic.keys()):
+        reader = sitk.ImageSeriesReader()
+        dicom_names = series_dic[id]
+        reader.SetFileNames(dicom_names)
+        image = reader.Execute()
+        data_dict[name] = image
+    return data_dict
+# def load_sygnovia_results(cbv_ml=5, sd=2):
+#     sd = 2
+#     simulated_data_size = 32 * 7
+#     scan_center = 512 // 2
+#     simulated_data_start = scan_center - simulated_data_size // 2
+#     simulated_data_end = scan_center + simulated_data_size // 2
+#     data = {}
+#     data['cbf'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/CBF')
+#     data['cbv'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/CBV')
+#     data['mtt'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/MTT')
+#     data['tmax'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/Tmax')
+#     data['ttd'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/TTD')
+#     data['delay'] = data['tmax'] - 0.5 * data['mtt']
+#
+#     for key, val in data.items():
+#         array = sitk.GetArrayFromImage(val)[11:]
+#         array = array[cbv_ml-1]
+#         data[key] = array[simulated_data_start:simulated_data_end, simulated_data_start:simulated_data_end]
+#     return data
 def load_sygnovia_results(cbv_ml=5, sd=2):
     simulated_data_size = 32 * 7
     scan_center = 512 // 2
     simulated_data_start = scan_center - simulated_data_size // 2
     simulated_data_end = scan_center + simulated_data_size // 2
-    data = {}
-    data['cbf'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/CBF')
-    data['cbv'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/CBV')
-    data['mtt'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/MTT')
-    data['tmax'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/Tmax')
-    data['ttd'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/TTD')
-    data['delay'] = data['tmax'] - 0.5 * data['mtt']
-
+    data = read_dcm(rf'data/sygnovia_results/sd{sd}')
+    # data['delay_cal'] = data['tmax'] - 0.5 * data['mtt']
     for key, val in data.items():
         array = sitk.GetArrayFromImage(val)[11:]
         array = array[cbv_ml-1]
         data[key] = array[simulated_data_start:simulated_data_end, simulated_data_start:simulated_data_end]
     return data
-
 def load_phantom_gt(cbv_ml=5, simulation_method=2):
     perfusion_values = np.empty([5, 7, 7, 4])
     cbv = [1, 2, 3, 4, 5]  # in ml / 100g
@@ -210,6 +235,7 @@ def visualize(slice, case, perfusion_values, result_dict):
 
 def plot_software_results(results_dict, phantom_dict, name='Sygno.via'):
 
+
     cbf = results_dict['cbf']
     cbv = results_dict['cbv']
     mtt = results_dict['mtt']
@@ -231,7 +257,6 @@ def plot_software_results(results_dict, phantom_dict, name='Sygno.via'):
     plt.rcParams["font.family"] = "serif"
     plt.rcParams["axes.linewidth"] = 1.5
     plt.rcParams["figure.dpi"] = 150
-
 
     fig, ax = plt.subplots(3, 5, figsize=(10,6))
     ax[0, 0].set_title('CBF', fontdict=font)
@@ -511,27 +536,8 @@ def add_colorbars_to_fig_difference(fig, ax, gt_axis):
         x.axes.yaxis.set_ticks([])
     # plt.tight_layout()
 
-# def log_software_results(results_dict, gt_dict, name='Sygno.via'):
-#
-#     min_cbf, max_cbf = 0, 150
-#     wandb.log({f"cbf_{name}_mse": np.mean((results_dict['cbf'] - gt_dict['cbf']) ** 2),
-#                f"cbv_{name}_mse": np.mean((results_dict['cbv'] - gt_dict['cbv']) ** 2),
-#                f"mtt_{name}_mse": np.mean((results_dict['mtt'] - gt_dict['mtt']) ** 2),
-#                f"delay_{name}_mse": np.mean((results_dict['delay'] - gt_dict['delay']) ** 2),
-#                f"tmax_{name}_mse": np.mean((results_dict['tmax'] - gt_dict['tmax']) ** 2),
-#                f"cbf_{name}_mae": np.abs((results_dict['cbf'] - gt_dict['cbf'])),
-#                f"cbv_{name}_mae": np.abs((results_dict['cbv'] - gt_dict['cbv'])),
-#                f"mtt_{name}_mae": np.abs((results_dict['mtt'] - gt_dict['mtt'])),
-#                f"delay_{name}_mae": np.abs((results_dict['delay'] - gt_dict['delay'])),
-#                f"tmax_{name}_mae": np.abs((results_dict['tmax'] - gt_dict['tmax'])),
-#                f"cbf_{name}_mean": np.mean((results_dict['cbf'] - gt_dict['cbf'])),
-#                f"cbv_{name}_mean": np.mean((results_dict['cbv'] - gt_dict['cbv'])),
-#                f"mtt_{name}_mean": np.mean((results_dict['mtt'] - gt_dict['mtt'])),
-#                f"delay_{name}_mean": np.mean((results_dict['delay'] - gt_dict['delay'])),
-#                f"tmax_{name}_mean": np.mean((results_dict['tmax'] - gt_dict['tmax']))
-#                })
 
-def log_software_results(results, cbv_ml):
+def log_software_results(results, cbv_ml, corrected=False):
     for metric in ['mse', 'mae', 'me']:
         table = []
         for key in ['cbf', 'cbv', 'mtt', 'delay', 'tmax']:
@@ -556,7 +562,7 @@ def log_software_results(results, cbv_ml):
         df = pd.DataFrame(columns=['cbv_ml', 'parameter', 'NLR', 'Sygnovia', 'PPINN'], data=table)
         wandb_table = wandb.Table(data=df)
         # wandb_table = wandb.Table(data=table, columns=columns)
-        wandb.log({f'table_{metric}': wandb_table})
+        wandb.log({f'table_{metric}': wandb_table}) if not corrected else wandb.log({f'table_{metric}_cor': wandb_table})
 def drop_edges(results):
     skip_rows = sorted(list(range(-2, 226, 32)) + list(range(-1, 226, 32)) + list(range(0, 226, 32)) + list(range(1, 226, 32)))
     skip_rows = skip_rows[2:-2]
@@ -581,19 +587,43 @@ def plot_results(results):
     plot_software_results_on_axis(ax[1], results['nlr'], name='NLR')
     plot_software_results_on_axis(ax[2], results['ppinn'], name='PPINN')
     plot_software_results_on_axis(ax[3], results['gt'], name='GT')
+
+    ax = color_axes(ax)
     add_colorbars_to_fig(results['gt'], fig, ax, 3)
     # plt.tight_layout()
     os.makedirs(os.path.join(wandb.run.dir, 'plots'), exist_ok=True)
     plt.savefig(os.path.join(wandb.run.dir, 'plots', f'software_vs_gt.png'), dpi=150)
-    wandb.log({"results_compare": plt})
+    wandb.log({"results_compare": plt}) if not corrected else wandb.log({"results_compare_cor": plt})
 
     fig, ax = plt.subplots(4, 5, figsize=(14, 14))
     add_colorbars_to_fig_difference(fig, ax, 2)
     plot_software_difference_on_axis(ax[0], results['sygnovia'], results['gt'], name='Sygno.via', title=True)
     plot_software_difference_on_axis(ax[1], results['nlr'], results['gt'], name='NLR')
     plot_software_difference_on_axis(ax[2], results['ppinn'], results['gt'], name='PPINN')
+    ax = color_axes(ax)
+
     # plt.tight_layout()
     os.makedirs(os.path.join(wandb.run.dir, 'plots'), exist_ok=True)
     plt.savefig(os.path.join(wandb.run.dir, 'plots', f'software_vs_gt_difference.png'), dpi=150)
-    wandb.log({"results_compare_difference": plt})
+    wandb.log({"results_compare_difference": plt}) if not corrected else wandb.log({"results_compare_difference_cor": plt})
     # plt.show()
+
+def color_axes(ax):
+    ax[1,0].spines['bottom'].set_color('red')
+    ax[1,0].spines['top'].set_color('red')
+    ax[1,0].spines['left'].set_color('red')
+    ax[1,0].spines['right'].set_color('red')
+    ax[1,4].spines['bottom'].set_color('red')
+    ax[1,4].spines['top'].set_color('red')
+    ax[1,4].spines['left'].set_color('red')
+    ax[1,4].spines['right'].set_color('red')
+
+    ax[2,2].spines['bottom'].set_color('red')
+    ax[2,2].spines['top'].set_color('red')
+    ax[2,2].spines['left'].set_color('red')
+    ax[2,2].spines['right'].set_color('red')
+    ax[2,4].spines['bottom'].set_color('red')
+    ax[2,4].spines['top'].set_color('red')
+    ax[2,4].spines['left'].set_color('red')
+    ax[2,4].spines['right'].set_color('red')
+    return ax

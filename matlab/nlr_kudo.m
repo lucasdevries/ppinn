@@ -1,9 +1,9 @@
 
-clear all
+% clear all
 close all
 clc
 
-path = 'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\image_data_sd_2.nii';
+path = 'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\NLR_image_data_sd_5.nii';
 
 im = niftiread(path);
 im = squeeze(im);
@@ -85,7 +85,7 @@ DEL = X(:, :, :, 3);
 % colormap('jet')
 
 PERF = squeeze(PERF);
-niftiwrite(PERF, 'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\nlr_results\nlr_sd_2')
+niftiwrite(PERF, 'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\nlr_results\nlr_sd_5')
 % save(PERF, 'L:\basic\divi\CMAJOIE\CLEOPATRA\Substudies\Lucas\KudoPhantom\unfiltered_rescaled_aif_lucas.mat')
 
 %%

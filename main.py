@@ -39,10 +39,12 @@ def main():
         'ppinn': train(config)
     }
 
-    results = drop_edges(results) if config.drop_edges else results
-    results = drop_unphysical(results) if config.drop_unphysical else results
     plot_results(results)
     log_software_results(results, config.cbv_ml)
+    results = drop_edges(results) # if config.drop_edges else results
+    results = drop_unphysical(results) # if config.drop_unphysical else results
+    plot_results(results, corrected=True)
+    log_software_results(results, config.cbv_ml, corrected=True)
 
 def train(config):
     data_dict = data_utils.load_data(gaussian_filter_type=config.filter_type,
@@ -57,8 +59,8 @@ def train(config):
                   perfusion_values=data_dict['perfusion_values'],
                   n_inputs=1,
                   std_t=data_dict['std_t'])
-    ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
-    ppinn.plot_params_difference(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
+    # ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
+    # ppinn.plot_params_difference(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
 
     ppinn.fit(data_dict['time'],
               data_dict['aif'],
