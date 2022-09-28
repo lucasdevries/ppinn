@@ -255,9 +255,9 @@ def normalize_data(data_dict):
 
 def get_coll_points(data_dict):
     data_dict['coll_points'] = np.random.uniform(
-        min(data_dict['time']), max(data_dict['time']), len(data_dict['time']) * 5 * 10 * 3
+        np.min(data_dict['time']), np.max(data_dict['time']), len(data_dict['time']) * 5 * 10 * 3
     ).astype(np.float32)
-    data_dict['bound'] = np.array([min(data_dict['time'])])
+    data_dict['bound'] = np.array([np.min(data_dict['time'])])
     return data_dict
 
 
