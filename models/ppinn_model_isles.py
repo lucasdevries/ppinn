@@ -216,7 +216,7 @@ class PPINN_isles(nn.Module):
         data_boundary = data_dict['bound'].to(self.device)
         collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True, drop_last=True)
         brainmask = data_dict['brainmask']
-        for ep in range(self.current_iteration + 1, self.current_iteration + epochs + 1):
+        for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
             epoch_residual_loss = AverageMeter()

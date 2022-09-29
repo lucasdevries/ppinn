@@ -3,9 +3,7 @@ method: grid
 parameters:
   sd:
     values:
-      - 0
-      - 1
-      - 2
+      - 3
   cbv_ml:
     values:
       - 1

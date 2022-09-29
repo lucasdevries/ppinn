@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from models.MLP_isles import MLP
+from models.MLP_amc import MLP
 from utils.train_utils import AverageMeter, weightConstraint
+from utils.val_utils import visualize_amc
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
@@ -17,9 +18,12 @@ class PPINN_amc(nn.Module):
     def __init__(self,
                  config,
                  shape_in,
-                 perfusion_values,
+                 # perfusion_values,
                  n_inputs=1,
-                 std_t=1):
+                 std_t=1,
+                 original_data_shape = None,
+                 original_indices = None
+                 ):
         super(PPINN_amc, self).__init__()
         self.config = config
         self.PID = os.getpid()
@@ -42,7 +46,9 @@ class PPINN_amc(nn.Module):
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
-        self.perfusion_values = perfusion_values
+        self.original_data_shape = original_data_shape
+        self.original_data_indices = original_indices
+        # self.perfusion_values = perfusion_values
         self.std_t = std_t
         self.neurons_out = 1
         # initialize flow parameters
@@ -88,16 +94,18 @@ class PPINN_amc(nn.Module):
         self.float()
 
 
-    def forward_NNs(self, t):
-
+    def forward_NNs(self, t, t_aif):
+        # Used for the data loss only
         t = t.unsqueeze(-1)
+        t_aif = t_aif.unsqueeze(-1)
 
         c_tissue = self.NN_tissue(t)
-        c_aif = self.NN_aif(t)
+        c_aif = self.NN_aif(t_aif)
         return c_aif, c_tissue
 
     def forward_complete(self, t):
         t = t.unsqueeze(-1)
+
         steps = t.shape[0]
         # Get NN output: a tissue curve for each voxel
         c_tissue = self.NN_tissue(t)
@@ -209,19 +217,26 @@ class PPINN_amc(nn.Module):
             data_dict,
             batch_size,
             epochs):
-        data_time = data_dict['time'].to(self.device)
+        # Here we should use the corrext timing
+        data_time = data_dict['time'].to(self.device)[slice]
+        data_aif_time = data_dict['aif_time'].to(self.device)
         data_aif = data_dict['aif'].to(self.device)
-        data_curves = data_dict['curves'][slice:slice+1].to(self.device)
+        data_curves = data_dict['curves'][slice:slice+1]
+        data_curves = data_curves[0][self.original_data_indices].unsqueeze(1).unsqueeze(0)
+        data_curves = data_curves.to(self.device)
+
+
         data_collopoints = data_dict['coll_points'].to(self.device)
         data_boundary = data_dict['bound'].to(self.device)
-        collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True, drop_last=True)
         brainmask = data_dict['brainmask']
-        for ep in range(self.current_iteration + 1, self.current_iteration + epochs + 1):
+        collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True, drop_last=True)
+        for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
             epoch_residual_loss = AverageMeter()
             for batch_collopoints in collopoints_dataloader:
                 batch_time = data_time
+                batch_aif_time = data_aif_time
                 batch_aif = data_aif
                 batch_curves = data_curves
                 batch_boundary = data_boundary
@@ -229,7 +244,8 @@ class PPINN_amc(nn.Module):
                                                          batch_aif,
                                                          batch_curves,
                                                          batch_boundary,
-                                                         batch_collopoints)
+                                                         batch_collopoints,
+                                                         batch_aif_time)
 
                 epoch_aif_loss.update(loss_aif.item(), len(batch_time))
                 epoch_tissue_loss.update(loss_tissue.item(), len(batch_time))
@@ -242,50 +258,88 @@ class PPINN_amc(nn.Module):
                        "residual_loss": epoch_residual_loss.avg,
                        "lr": self.optimizer.param_groups[0]['lr'],
                        }
-            if ep in [3,10, 20, 30, 40, 50, 100]:
+            if ep in [30, 40, 50, 99]:
                 data_time_inf = data_dict['time_inference_highres'].to(self.device)
-                aif_inf, tac_inf = self.forward_NNs(data_time_inf)
-                colors = ['k', 'r', 'b', 'g']
-                for i in range(4):
-                    plt.plot(data_dict['time_inference_highres'], tac_inf[0,128+i,128].cpu().detach().numpy(), c=colors[i])
-                    plt.scatter(data_dict['time'], data_dict['curves'][slice,128+i,128].cpu().detach().numpy(), c=colors[i])
+                aif_inf, tac_inf = self.forward_NNs(data_time_inf, data_time_inf)
+                # colors = ['k', 'r', 'b', 'g']
+                # plt.imshow(data_dict['curves'][slice+5,...,0].cpu().detach().numpy())
+                # plt.show()
+                # for i in range(256):
+                #     # plt.scatter(data_dict['time_inference_highres'], tac_inf[0,256+i,256].cpu().detach().numpy(), c='k')
+                #     plt.scatter(data_dict['time'][slice], data_dict['curves'][slice+5,128+i,256].cpu().detach().numpy(), c='k')
+                # # wandb.log({"curves": plt})
+                # plt.show()
+
+                colors = ['k']
+                for i in range(1):
+                    plt.scatter(data_dict['time_inference_highres'], aif_inf.cpu().detach().numpy(), c=colors[i])
+                plt.scatter(data_dict['aif_time'], data_dict['aif'], c='r')
+                # wandb.log({"aif": plt})
                 plt.show()
-                np.save(f'aif_estimates_{ep}.npy', aif_inf.cpu().detach().numpy())
-                np.save(f'tacs_estimates_{ep}.npy', tac_inf.cpu().detach().numpy())
-                np.save('tacs.npy', data_dict['curves'][slice].cpu().detach().numpy())
-                np.save('aif.npy', data_dict['aif'].cpu().detach().numpy())
 
-                sitk.WriteImage(sitk.GetImageFromArray(tac_inf[0].cpu().detach().numpy()),f'estimates_{ep}.nii')
-                sitk.WriteImage(sitk.GetImageFromArray(data_dict['curves'][slice].cpu().detach().numpy()),f'curves{ep}.nii')
+                cbf = torch.zeros(self.original_data_shape).to(self.device)
+                mtt = torch.zeros(self.original_data_shape).to(self.device)
+                mtt_min = torch.zeros(self.original_data_shape).to(self.device)
+                delay = torch.zeros(self.original_data_shape).to(self.device)
+
+                cbf[self.original_data_indices] = self.get_cbf(seconds=False).squeeze()
+                mtt[self.original_data_indices] = self.get_mtt(seconds=True).squeeze()
+                mtt_min[self.original_data_indices] = self.get_mtt(seconds=False).squeeze()
+                delay[self.original_data_indices] = self.get_delay(seconds=True).squeeze()
+
+                cbv = cbf * mtt_min
+                tmax = delay + 0.5 * mtt
+                visualize_amc(slice, {'cbf': cbf,
+                        'cbv': cbv,
+                        'mtt': mtt,
+                        'delay': delay,
+                        'tmax': tmax})
+                # np.save(f'aif_estimates_{ep}.npy', aif_inf.cpu().detach().numpy())
+                # np.save(f'tacs_estimates_{ep}.npy', tac_inf.cpu().detach().numpy())
+                # np.save('tacs.npy', data_dict['curves'][slice].cpu().detach().numpy())
+                # np.save('aif.npy', data_dict['aif'].cpu().detach().numpy())
+                #
+                # sitk.WriteImage(sitk.GetImageFromArray(tac_inf[0].cpu().detach().numpy()),f'estimates_{ep}.nii')
+                # sitk.WriteImage(sitk.GetImageFromArray(data_dict['curves'][slice].cpu().detach().numpy()),f'curves{ep}.nii')
 
 
 
 
 
-            # wandb.log(metrics, step=self.current_iteration)
+            wandb.log(metrics, step=self.current_iteration)
 
             # if ep % self.config.plot_params_every == 0:
             #     self.plot_params(slice, ep, brainmask)
             self.current_iteration += 1
 
-        brainmask = brainmask[slice:slice+1].to(self.device)
-        cbf = brainmask * self.get_cbf(seconds=False).squeeze(-1)
-        mtt = brainmask * self.get_mtt(seconds=True).squeeze(-1)
-        mtt_min = brainmask * self.get_mtt(seconds=False).squeeze(-1)
-        delay = brainmask * self.get_delay(seconds=True).squeeze(-1).squeeze(-1)
+        # get results
+        # self.original_data_indices = original_indices
+        cbf = torch.zeros(self.original_data_shape).to(self.device)
+        mtt = torch.zeros(self.original_data_shape).to(self.device)
+        mtt_min = torch.zeros(self.original_data_shape).to(self.device)
+        delay = torch.zeros(self.original_data_shape).to(self.device)
+
+        cbf[self.original_data_indices] = self.get_cbf(seconds=False).squeeze()
+        mtt[self.original_data_indices] = self.get_mtt(seconds=True).squeeze()
+        mtt_min[self.original_data_indices] = self.get_mtt(seconds=False).squeeze()
+        delay[self.original_data_indices] = self.get_delay(seconds=True).squeeze()
+
         cbv = cbf * mtt_min
         tmax = delay + 0.5*mtt
+
         return {'cbf': cbf,
                 'cbv': cbv,
                 'mtt': mtt,
                 'delay': delay,
                 'tmax': tmax}
+
     def optimize(self,
                  batch_time,
                  batch_aif,
                  batch_curves,
                  batch_boundary,
-                 batch_collopoints
+                 batch_collopoints,
+                 batch_aif_time
                  ):
         self.train()
         self.optimizer.zero_grad()
@@ -303,7 +357,7 @@ class PPINN_amc(nn.Module):
 
         if self.lw_data:
             # compute data loss
-            c_aif, c_tissue = self.forward_NNs(batch_time)
+            c_aif, c_tissue = self.forward_NNs(batch_time, batch_aif_time)
             loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
             loss += self.lw_data * (loss_aif + loss_tissue)
         if self.lw_res:
@@ -382,100 +436,3 @@ class PPINN_amc(nn.Module):
             create_graph=True,
         )[0]
         return out
-
-    def plot_params(self,slice, epoch, brainmask):
-        brainmask = brainmask[slice:slice+1].to(self.device)
-        cbf = brainmask * self.get_cbf(seconds=False).squeeze(-1)
-        mtt = brainmask * self.get_mtt(seconds=True).squeeze(-1)
-        mtt_min = brainmask * self.get_mtt(seconds=False).squeeze(-1)
-        delay = brainmask * self.get_delay(seconds=True).squeeze(-1).squeeze(-1)
-        # cbf = torch.clip(cbf, min=0, max=125)
-        cbv = cbf * mtt_min
-        isles_cbf = self.perfusion_values[slice:slice+1,..., 0]
-        isles_cbv = self.perfusion_values[slice:slice+1,..., 1]
-        isles_mtt = self.perfusion_values[slice:slice+1,..., 2]
-        isles_tmax= self.perfusion_values[slice:slice+1,..., 3]
-        isles_gt_core = self.perfusion_values[slice:slice+1,..., 4]
-
-        [cbf, mtt, cbv, delay, isles_cbf, isles_cbv, isles_mtt, isles_tmax, isles_gt_core] = [x.detach().cpu().numpy() for x in
-                                                          [cbf, mtt, cbv, delay, isles_cbf, isles_cbv, isles_mtt, isles_tmax, isles_gt_core]]
-        i = 0
-
-        font = {'family': 'serif',
-                'color': 'black',
-                'weight': 'normal',
-                'size': 15,
-                }
-        plt.rcParams["font.family"] = "serif"
-        plt.rcParams["axes.linewidth"] = 1.5
-        plt.rcParams["figure.dpi"] = 150
-        fig, ax = plt.subplots(2, 4, figsize=(10,12))
-
-        ax[0, 0].set_ylabel('PPINN', fontdict=font)
-        ax[1, 0].set_ylabel('ISLES/Rapid', fontdict=font)
-
-        ax[0,0].set_title('CBF', fontdict=font)
-        im = ax[0,0].imshow(cbf[i], vmin=0, vmax=100, cmap='jet')
-        cax = ax[0,0].inset_axes([0, -0.2, 1, 0.1])
-        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
-        bar.outline.set_color('black')
-        bar.set_label('ml/100g/min', fontdict=font)
-        bar.ax.tick_params(labelsize=14)
-
-        im = ax[1,0].imshow(isles_cbf[i], vmin=0, vmax=400, cmap='jet')
-        cax = ax[1,0].inset_axes([0, -0.2, 1, 0.1])
-        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
-        bar.outline.set_color('black')
-        bar.set_label('ml/100g/min', fontdict=font)
-        bar.ax.tick_params(labelsize=14)
-
-
-        ax[0, 1].set_title('MTT', fontdict=font)
-        im = ax[0, 1].imshow(mtt[i], vmin=0.01, vmax=1.1 * 24, cmap='jet')
-        cax = ax[0, 1].inset_axes([0, -0.2, 1, 0.1])
-        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
-        bar.outline.set_color('black')
-        bar.set_label('seconds', fontdict=font)
-        bar.ax.tick_params(labelsize=14)
-
-        im = ax[1, 1].imshow(isles_mtt[i], vmin=0.01, vmax=1.1*24, cmap='jet')
-        cax = ax[1, 1].inset_axes([0, -0.2, 1, 0.1])
-        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
-        bar.outline.set_color('black')
-        bar.set_label('seconds', fontdict=font)
-        bar.ax.tick_params(labelsize=14)
-
-        ax[0, 2].set_title('CBV', fontdict=font)
-        im = ax[0, 2].imshow(cbv[i], vmin=0.01, vmax=7, cmap='jet')
-        cax = ax[0, 2].inset_axes([0, -0.2, 1, 0.1])
-        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
-        bar.outline.set_color('black')
-        bar.set_label('ml/100g', fontdict=font)
-        bar.ax.tick_params(labelsize=14)
-
-        im = ax[1, 2].imshow(isles_cbv[i], vmin=0.01, vmax=75, cmap='jet')
-        cax = ax[1, 2].inset_axes([0, -0.2, 1, 0.1])
-        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
-        bar.outline.set_color('black')
-        bar.set_label('ml/100g', fontdict=font)
-        bar.ax.tick_params(labelsize=14)
-
-        ax[0, 3].set_title('Delay', fontdict=font)
-        im = ax[0, 3].imshow(delay[i], vmin=0.01, vmax=3.5, cmap='jet')
-        im = ax[1, 3].imshow(isles_gt_core[i], vmin=0.01, vmax=2, cmap='jet')
-        cax = ax[1, 3].inset_axes([0, -0.2, 1, 0.1])
-        bar = fig.colorbar(im, cax=cax, orientation="horizontal")
-        bar.outline.set_color('black')
-        bar.set_label('seconds', fontdict=font)
-        bar.ax.tick_params(labelsize=14)
-
-        for i in range(4):
-            ax[1,i].set_axis_off()
-        for x in ax.flatten():
-            x.axes.xaxis.set_ticks([])
-            x.axes.yaxis.set_ticks([])
-        fig.suptitle('Parameter estimation epoch: {}'.format(epoch), fontdict=font)
-        plt.tight_layout()
-        # wandb.log({"parameters": plt}, step=epoch)
-        plt.show()
-        plt.close()

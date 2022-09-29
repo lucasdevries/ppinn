@@ -15,7 +15,7 @@
   "bn" : false,
   "batch_size": 16,
   "optimizer": "Adam",
-  "epochs": 1000,
+  "epochs": 31,
   "filter_type": "gauss_spatial",
   "sd": 2,
   "plot_params_every": 2000,
@@ -26,6 +26,7 @@
   "temporal_smoothing": false,
   "baseline_zero": false,
   "drop_edges": true,
-  "drop_unphysical": true
+  "drop_unphysical": true,
+  "data": "AMCCTP"
 }
 

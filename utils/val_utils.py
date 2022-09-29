@@ -95,7 +95,8 @@ def load_phantom_gt(cbv_ml=5, simulation_method=2):
                              'mtt': perfusion_values[simulation_method, cbv_ml-1, ..., 2] * 60}
     perfusion_values_dict['tmax'] = perfusion_values_dict['delay'] + 0.5 * perfusion_values_dict['mtt']
     return perfusion_values_dict
-def visualize(slice, case, perfusion_values, result_dict):
+
+def visualize_amc(slice, result_dict):
     font = {'family': 'serif',
             'color': 'black',
             'weight': 'normal',
@@ -104,6 +105,62 @@ def visualize(slice, case, perfusion_values, result_dict):
     plt.rcParams["font.family"] = "serif"
     plt.rcParams["axes.linewidth"] = 1.5
     plt.rcParams["figure.dpi"] = 150
+
+    cbf_results = result_dict['cbf'].cpu().detach().numpy()
+    cbv_results = result_dict['cbv'].cpu().detach().numpy()
+    mtt_results = result_dict['mtt'].cpu().detach().numpy()
+    delay_results = result_dict['delay'].cpu().detach().numpy()
+    tmax_results = result_dict['tmax'].cpu().detach().numpy()
+
+    fig, ax = plt.subplots(1, 5, figsize = (10,5))
+
+    ax[0].set_title('CBF', fontdict=font)
+    im = ax[0].imshow(cbf_results, vmin=np.percentile(cbf_results[cbf_results>0],10), vmax=np.percentile(cbf_results[cbf_results>0],90), cmap='jet')
+    cax = ax[0].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('ml/100g/min', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[1].set_title('MTT', fontdict=font)
+    im = ax[1].imshow(mtt_results, vmin=np.percentile(mtt_results[mtt_results>0],10), vmax=np.percentile(mtt_results[mtt_results>0],90), cmap='jet')
+    cax = ax[1].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('seconds', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[2].set_title('CBV', fontdict=font)
+    im = ax[2].imshow(cbv_results, vmin=np.percentile(cbv_results[cbv_results>0],10), vmax=np.percentile(cbv_results[cbv_results>0],90), cmap='jet')
+    cax = ax[2].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('ml/100g', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[3].set_title('Delay', fontdict=font)
+    im = ax[3].imshow(delay_results, vmin=np.percentile(delay_results[delay_results>0],10), vmax=np.percentile(delay_results[delay_results>0],90), cmap='jet')
+    cax = ax[3].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('s', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[4].set_title('Tmax', fontdict=font)
+    im = ax[4].imshow(tmax_results, vmin=np.percentile(tmax_results[tmax_results>0],10), vmax=np.percentile(tmax_results[tmax_results>0],90), cmap='jet')
+    cax = ax[4].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('s', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+    for i in range(5):
+        ax[i].set_axis_off()
+    for x in ax.flatten():
+        x.axes.xaxis.set_ticks([])
+        x.axes.yaxis.set_ticks([])
+    plt.show()
+
+def visualize(slice, case, perfusion_values, result_dict):
 
     cbf_results = result_dict['cbf'].cpu().detach().numpy()
     cbv_results = result_dict['cbv'].cpu().detach().numpy()
