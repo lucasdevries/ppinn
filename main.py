@@ -9,9 +9,11 @@ import numpy as np
 import argparse
 from tqdm import tqdm
 from utils.val_utils import visualize, visualize_amc, load_sygnovia_results, load_nlr_results, load_phantom_gt
-from utils.val_utils import log_software_results, plot_results, drop_edges, drop_unphysical
+from utils.val_utils import log_software_results, plot_results, drop_edges, drop_unphysical, drop_unphysical_amc
 import matplotlib.pyplot as plt
 import torch
+
+
 def main():
     # parse the path of the json config file
     arg_parser = argparse.ArgumentParser(description="")
@@ -43,8 +45,8 @@ def main():
         }
         plot_results(results)
         log_software_results(results, config.cbv_ml)
-        results = drop_edges(results) # if config.drop_edges else results
-        results = drop_unphysical(results) # if config.drop_unphysical else results
+        results = drop_edges(results)  # if config.drop_edges else results
+        results = drop_unphysical(results)  # if config.drop_unphysical else results
         plot_results(results, corrected=True)
         log_software_results(results, config.cbv_ml, corrected=True)
     elif config.data == 'AMCCTP':
@@ -57,6 +59,7 @@ def main():
         }
     else:
         raise NotImplementedError("What are you trying to do?")
+
 
 def train(config):
     data_dict = data_utils.load_data(gaussian_filter_type=config.filter_type,
@@ -86,16 +89,15 @@ def train(config):
     ppinn_results = ppinn.get_results()
     return ppinn_results
 
+
 def train_amc(config):
-    cases = os.listdir(r'data/AMCCTP/CTP_nii_registered')
-    for case in ['C116']:
+    cases = os.listdir(r'D:/PPINN_patient_data/AMCCTP/CTP_nii_registered')
+    for case in tqdm(cases):
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_AMC(gaussian_filter_type=config.filter_type,
                                              sd=config.sd,
                                              case=case)
 
-        shape_in = data_dict['curves'][0:1].shape[:-1]
-        time_dimensions = data_dict['curves'].shape[-1]
         scan_dimensions = data_dict['curves'].shape[:-1]
         slices = scan_dimensions[0]
         cbf_results = np.zeros([*scan_dimensions], dtype=np.float32)
@@ -104,54 +106,52 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in range(20,slices):
-            # slice_data = data_dict['curves'][slice]
+        for slice in range(slices):
             brainmask_data = data_dict['brainmask'][slice]
             valid_voxels = torch.where(brainmask_data == 1)
-            # slice_data_filtered = slice_data[valid_voxels]
             shape_in = torch.Size([1, len(valid_voxels[0]), 1])
-
             if len(valid_voxels[0]) == 0:
+                cbf_results[slice, ...] = np.zeros([512, 512])
+                cbv_results[slice, ...] = np.zeros([512, 512])
+                mtt_results[slice, ...] = np.zeros([512, 512])
+                delay_results[slice, ...] = np.zeros([512, 512])
+                tmax_results[slice, ...] = np.zeros([512, 512])
                 continue
-            # zero_voxels_x, zero_voxels_y = torch.where(brainmask_data == 0)
-            # reshaped_slice_data = torch.zeros((len(valid_voxels_x), time_dimensions))
-            # reshaped_slice_data = torch.reshape(slice_data, (-1, time_dimensions))
-            # reshaped_brainmask_data = torch.reshape(brainmask_data, (-1, 1))
-            # for ix, x, y in enumerate(zip(valid_voxels_x,valid_voxels_y)):
-
             ppinn = PPINN_amc(config,
-                                shape_in=shape_in,
-                                # perfusion_values=data_dict['perfusion_values'], # here we sould input sygnovia maps
-                                n_inputs=1,
-                                std_t=data_dict['std_t'],
-                               original_data_shape=scan_dimensions[1:],
-                              original_indices = valid_voxels
+                              shape_in=shape_in,
+                              n_inputs=1,
+                              std_t=data_dict['std_t'],
+                              original_data_shape=scan_dimensions[1:],
+                              original_indices=valid_voxels
                               )
             result_dict = ppinn.fit(slice,
-                      data_dict,
-                      batch_size=config.batch_size,
-                      epochs=int(config.epochs))
-            cbf_results[slice, ...] = result_dict['cbf'].cpu().detach().numpy()
-            cbv_results[slice, ...] = result_dict['cbv'].cpu().detach().numpy()
-            mtt_results[slice, ...] = result_dict['mtt'].cpu().detach().numpy()
-            delay_results[slice, ...] = result_dict['delay'].cpu().detach().numpy()
-            tmax_results[slice, ...] = result_dict['tmax'].cpu().detach().numpy()
+                                    data_dict,
+                                    batch_size=config.batch_size,
+                                    epochs=int(config.epochs))
 
-            visualize_amc(slice, result_dict)
+            result_dict = drop_unphysical_amc(result_dict)
+            cbf_results[slice, ...] = result_dict['cbf']
+            cbv_results[slice, ...] = result_dict['cbv']
+            mtt_results[slice, ...] = result_dict['mtt']
+            delay_results[slice, ...] = result_dict['delay']
+            tmax_results[slice, ...] = result_dict['tmax']
+            visualize_amc(case, slice, result_dict, data_dict)
 
-        data_utils.save_perfusion_parameters(config,
-                                             case,
-                                             cbf_results,
-                                             cbv_results,
-                                             mtt_results,
-                                             delay_results,
-                                             tmax_results)
+        # save maps as sitks
+        data_utils.save_perfusion_parameters_amc(config,
+                                                 case,
+                                                 cbf_results,
+                                                 cbv_results,
+                                                 mtt_results,
+                                                 delay_results,
+                                                 tmax_results
+                                                 )
 
 def train_isles(config):
     folder = 'TRAINING' if config.mode == 'train' else 'TESTING'
     cases = os.listdir(r'data/ISLES2018/{}'.format(folder))
     for case in cases[10:]:
-        os.makedirs(os.path.join(wandb.run.dir, 'results',case))
+        os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_ISLES(filter_type=config.filter_type,
                                                sd=config.sd,
                                                temporal_smoothing=config.temporal_smoothing,
@@ -174,9 +174,9 @@ def train_isles(config):
                                 n_inputs=1,
                                 std_t=data_dict['std_t'])
             result_dict = ppinn.fit(slice,
-                      data_dict,
-                      batch_size=config.batch_size,
-                      epochs=int(config.epochs))
+                                    data_dict,
+                                    batch_size=config.batch_size,
+                                    epochs=int(config.epochs))
             cbf_results[slice, ...] = result_dict['cbf'].cpu().detach().numpy()
             cbv_results[slice, ...] = result_dict['cbv'].cpu().detach().numpy()
             mtt_results[slice, ...] = result_dict['mtt'].cpu().detach().numpy()
@@ -192,6 +192,7 @@ def train_isles(config):
                                              mtt_results,
                                              delay_results,
                                              tmax_results)
+
 
 if __name__ == "__main__":
     main()

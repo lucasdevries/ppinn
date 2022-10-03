@@ -240,15 +240,17 @@ def load_data_ISLES(filter_type, sd=2.5,
 
 
 def load_data_AMC(gaussian_filter_type, sd=2,
-                    folder=r'data/AMCCTP',
+                    folder=r'D:/PPINN_patient_data/AMCCTP',
                     case='C102'):
     aif_location = os.path.join(folder, rf'AIF_annotations/{case}/aif.nii.gz')
     vof_location = os.path.join(folder, rf'VOF_annotations/{case}/vof.nii.gz')
     time_matrix = os.path.join(folder, rf'CTP_time_matrix/{case}/matrix.npy')
     ctp_folder = os.path.join(folder, rf'CTP_nii_registered/{case}/*.nii.gz')
     brainmask = os.path.join(folder, rf'CTP_nii_brainmask/{case}/brainmask.nii.gz')
+    dwi_segmentation = os.path.join(folder,  rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
     # load image data
     image_data_dict = read_nii_folder(ctp_folder)
+    dwi_segmentation = sitk.ReadImage(dwi_segmentation)
     # load time matrix
     time_data = np.load(time_matrix)
     # load aif and vof locations
@@ -258,7 +260,6 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     time_vof_location = list(set(np.where(vof_location == 1)[0]))[0]
     # load brainmask
     brainmask_data = sitk.GetArrayFromImage(sitk.ReadImage(brainmask))
-    image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
     # get aif and vof data
     aif_data = np.sum(np.multiply(aif_location, image_data_dict['array']), axis=(1,2,3)) / np.sum(aif_location)
     vof_data = np.sum(np.multiply(vof_location, image_data_dict['array']), axis=(1,2,3)) / np.sum(vof_location)
@@ -274,6 +275,7 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     cumsum_vof = simpson(vof_wo_baseline, vof_time_data)
     ratio = cumsum_vof / cumsum_aif
     aif_data = aif_wo_baseline * ratio + aif_baseline
+    image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
     # If smoothing, apply here
     if gaussian_filter_type:
         image_data_dict['array'] = apply_gaussian_filter(gaussian_filter_type, image_data_dict['array'].copy(), sd=sd)
@@ -287,12 +289,15 @@ def load_data_AMC(gaussian_filter_type, sd=2,
                  'time': time_data,
                  'time_inference_highres': time_inference_highres,
                  'curves': image_data_dict['array'],
-                 'brainmask': brainmask_data}
+                 'brainmask': brainmask_data,
+
+                 }
 
     data_dict = normalize_data(data_dict)
     data_dict = get_coll_points(data_dict)
     data_dict = get_tensors(data_dict)
     data_dict['aif_time'] = data_dict['time'][time_aif_location]
+    data_dict['dwi_segmentation'] = dwi_segmentation
     return data_dict
 
 def read_nii_folder(folder):
@@ -390,7 +395,25 @@ def apply_billateral_filter(array, mask, sigma_spatial):
     plt.show()
     return filtered
 
+def save_perfusion_parameters_amc(config, case, cbf_results, cbv_results, mtt_results, delay_results, tmax_results):
+    dwi_segmentation = os.path.join(r'D:/PPINN_patient_data/AMCCTP', rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
+    template = sitk.ReadImage(dwi_segmentation)
+    sitk.WriteImage(template, os.path.join(wandb.run.dir, 'results', case, 'dwi_seg.nii'))
 
+    cbf_results = np2itk(cbf_results, template)
+    sitk.WriteImage(cbf_results, os.path.join(wandb.run.dir, 'results', case, 'cbf.nii'))
+
+    cbv_results = np2itk(cbv_results, template)
+    sitk.WriteImage(cbv_results, os.path.join(wandb.run.dir, 'results', case, 'cbv.nii'))
+
+    mtt_results = np2itk(mtt_results, template)
+    sitk.WriteImage(mtt_results, os.path.join(wandb.run.dir, 'results', case, 'mtt.nii'))
+
+    delay_results = np2itk(delay_results, template)
+    sitk.WriteImage(delay_results, os.path.join(wandb.run.dir, 'results', case, 'delay.nii'))
+
+    tmax_results = np2itk(tmax_results, template)
+    sitk.WriteImage(tmax_results, os.path.join(wandb.run.dir, 'results', case, 'tmax.nii'))
 def save_perfusion_parameters(config, case, cbf_results, cbv_results, mtt_results, delay_results, tmax_results):
     mode = 'TRAINING' if config.mode == 'train' else 'TESTING'
     folder = r'data/ISLES2018'

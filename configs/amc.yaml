@@ -3,11 +3,16 @@ method: grid
 parameters:
   lw_res:
     values:
-      - 1
-      - 5
-      - 10
+      - 250
+  data:
+    values:
+      - 'AMCCTP'
+  epochs:
+    values:
       - 25
-      - 100
+  sd:
+    values:
+      - 4
 command:
   - ${env}
   - python

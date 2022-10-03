@@ -96,23 +96,24 @@ def load_phantom_gt(cbv_ml=5, simulation_method=2):
     perfusion_values_dict['tmax'] = perfusion_values_dict['delay'] + 0.5 * perfusion_values_dict['mtt']
     return perfusion_values_dict
 
-def visualize_amc(slice, result_dict):
+def visualize_amc(case, slice, result_dict, data_dict):
     font = {'family': 'serif',
             'color': 'black',
             'weight': 'normal',
             'size': 15,
             }
     plt.rcParams["font.family"] = "serif"
-    plt.rcParams["axes.linewidth"] = 1.5
+    plt.rcParams["axes.linewidth"] = 1.0
     plt.rcParams["figure.dpi"] = 150
 
-    cbf_results = result_dict['cbf'].cpu().detach().numpy()
-    cbv_results = result_dict['cbv'].cpu().detach().numpy()
-    mtt_results = result_dict['mtt'].cpu().detach().numpy()
-    delay_results = result_dict['delay'].cpu().detach().numpy()
-    tmax_results = result_dict['tmax'].cpu().detach().numpy()
+    dwi_segmentation = sitk.GetArrayFromImage(data_dict['dwi_segmentation'])[slice]
+    cbf_results = result_dict['cbf']
+    cbv_results = result_dict['cbv']
+    mtt_results = result_dict['mtt']
+    delay_results = result_dict['delay']
+    tmax_results = result_dict['tmax']
 
-    fig, ax = plt.subplots(1, 5, figsize = (10,5))
+    fig, ax = plt.subplots(1, 6, figsize = (10,5))
 
     ax[0].set_title('CBF', fontdict=font)
     im = ax[0].imshow(cbf_results, vmin=np.percentile(cbf_results[cbf_results>0],10), vmax=np.percentile(cbf_results[cbf_results>0],90), cmap='jet')
@@ -153,12 +154,23 @@ def visualize_amc(slice, result_dict):
     bar.outline.set_color('black')
     bar.set_label('s', fontdict=font)
     bar.ax.tick_params(labelsize=14)
-    for i in range(5):
+
+    ax[5].set_title('DWI seg', fontdict=font)
+    im = ax[5].imshow(dwi_segmentation, vmin=0, vmax=2, cmap='jet')
+    # cax = ax[5].inset_axes([0, -0.2, 1, 0.1])
+    # bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    # bar.outline.set_color('black')
+    # bar.set_label('s', fontdict=font)
+    # bar.ax.tick_params(labelsize=14)
+
+    for i in range(6):
         ax[i].set_axis_off()
     for x in ax.flatten():
         x.axes.xaxis.set_ticks([])
         x.axes.yaxis.set_ticks([])
-    plt.show()
+    wandb.log({"results_{}".format(case): plt})
+    # plt.show()
+    plt.close()
 
 def visualize(slice, case, perfusion_values, result_dict):
 

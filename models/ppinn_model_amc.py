@@ -230,7 +230,7 @@ class PPINN_amc(nn.Module):
         data_boundary = data_dict['bound'].to(self.device)
         brainmask = data_dict['brainmask']
         collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True, drop_last=True)
-        for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
+        for ep in range(self.current_iteration + 1, self.current_iteration + epochs + 1):
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
             epoch_residual_loss = AverageMeter()
@@ -258,42 +258,38 @@ class PPINN_amc(nn.Module):
                        "residual_loss": epoch_residual_loss.avg,
                        "lr": self.optimizer.param_groups[0]['lr'],
                        }
-            if ep in [30, 40, 50, 99]:
-                data_time_inf = data_dict['time_inference_highres'].to(self.device)
-                aif_inf, tac_inf = self.forward_NNs(data_time_inf, data_time_inf)
-                # colors = ['k', 'r', 'b', 'g']
-                # plt.imshow(data_dict['curves'][slice+5,...,0].cpu().detach().numpy())
-                # plt.show()
-                # for i in range(256):
-                #     # plt.scatter(data_dict['time_inference_highres'], tac_inf[0,256+i,256].cpu().detach().numpy(), c='k')
-                #     plt.scatter(data_dict['time'][slice], data_dict['curves'][slice+5,128+i,256].cpu().detach().numpy(), c='k')
-                # # wandb.log({"curves": plt})
-                # plt.show()
+            # if ep in [9]:
+            #     data_time_inf = data_dict['time_inference_highres'].to(self.device)
+            #     aif_inf, tac_inf = self.forward_NNs(data_time_inf, data_time_inf)
+            #     # colors = ['k', 'r', 'b', 'g']
+            #     # plt.imshow(data_dict['curves'][slice+5,...,0].cpu().detach().numpy())
+            #     # plt.show()
+            #     # for i in range(256):
+            #     #     # plt.scatter(data_dict['time_inference_highres'], tac_inf[0,256+i,256].cpu().detach().numpy(), c='k')
+            #     #     plt.scatter(data_dict['time'][slice], data_dict['curves'][slice+5,128+i,256].cpu().detach().numpy(), c='k')
+            #     # # wandb.log({"curves": plt})
+            #     # plt.show()
+            #
+            #     colors = ['k']
+            #     for i in range(1):
+            #         plt.scatter(data_dict['time_inference_highres'], aif_inf.cpu().detach().numpy(), c=colors[i])
+            #     plt.scatter(data_dict['aif_time'], data_dict['aif'], c='r')
+            #     # wandb.log({"aif": plt})
+            #     plt.show()
+            #
+            #     cbf = torch.zeros(self.original_data_shape).to(self.device)
+            #     mtt = torch.zeros(self.original_data_shape).to(self.device)
+            #     mtt_min = torch.zeros(self.original_data_shape).to(self.device)
+            #     delay = torch.zeros(self.original_data_shape).to(self.device)
+            #
+            #     cbf[self.original_data_indices] = self.get_cbf(seconds=False).squeeze()
+            #     mtt[self.original_data_indices] = self.get_mtt(seconds=True).squeeze()
+            #     mtt_min[self.original_data_indices] = self.get_mtt(seconds=False).squeeze()
+            #     delay[self.original_data_indices] = self.get_delay(seconds=True).squeeze()
+            #
+            #     cbv = cbf * mtt_min
+            #     tmax = delay + 0.5 * mtt
 
-                colors = ['k']
-                for i in range(1):
-                    plt.scatter(data_dict['time_inference_highres'], aif_inf.cpu().detach().numpy(), c=colors[i])
-                plt.scatter(data_dict['aif_time'], data_dict['aif'], c='r')
-                # wandb.log({"aif": plt})
-                plt.show()
-
-                cbf = torch.zeros(self.original_data_shape).to(self.device)
-                mtt = torch.zeros(self.original_data_shape).to(self.device)
-                mtt_min = torch.zeros(self.original_data_shape).to(self.device)
-                delay = torch.zeros(self.original_data_shape).to(self.device)
-
-                cbf[self.original_data_indices] = self.get_cbf(seconds=False).squeeze()
-                mtt[self.original_data_indices] = self.get_mtt(seconds=True).squeeze()
-                mtt_min[self.original_data_indices] = self.get_mtt(seconds=False).squeeze()
-                delay[self.original_data_indices] = self.get_delay(seconds=True).squeeze()
-
-                cbv = cbf * mtt_min
-                tmax = delay + 0.5 * mtt
-                visualize_amc(slice, {'cbf': cbf,
-                        'cbv': cbv,
-                        'mtt': mtt,
-                        'delay': delay,
-                        'tmax': tmax})
                 # np.save(f'aif_estimates_{ep}.npy', aif_inf.cpu().detach().numpy())
                 # np.save(f'tacs_estimates_{ep}.npy', tac_inf.cpu().detach().numpy())
                 # np.save('tacs.npy', data_dict['curves'][slice].cpu().detach().numpy())
@@ -304,9 +300,7 @@ class PPINN_amc(nn.Module):
 
 
 
-
-
-            wandb.log(metrics, step=self.current_iteration)
+            # wandb.log(metrics, step=self.current_iteration)
 
             # if ep % self.config.plot_params_every == 0:
             #     self.plot_params(slice, ep, brainmask)
