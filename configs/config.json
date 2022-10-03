@@ -27,6 +27,6 @@
   "baseline_zero": false,
   "drop_edges": true,
   "drop_unphysical": true,
-  "data": "AMCCTP"
+  "data": "phantom"
 }
 

@@ -650,7 +650,19 @@ def drop_unphysical(results):
         results[k1]['tmax'] = np.clip(results[k1]['tmax'], a_min=0 , a_max=15)
     return results
 
-def plot_results(results):
+def drop_unphysical_amc(results):
+    results['cbf'] = np.clip(results['cbf'].cpu().detach().numpy(), a_min=0 , a_max=150)
+    results['cbv'] = np.clip(results['cbv'].cpu().detach().numpy(), a_min=0, a_max=10)
+    results['mtt'] = np.clip(results['mtt'].cpu().detach().numpy(), a_min=0 , a_max=30)
+    results['delay'] = np.clip(results['delay'].cpu().detach().numpy(), a_min=0 , a_max=10)
+    results['tmax'] = np.clip(results['tmax'].cpu().detach().numpy(), a_min=0 , a_max=15)
+    return results
+
+def plot_results(results, corrected=False):
+    plt.rcParams["font.family"] = "serif"
+    plt.rcParams["axes.linewidth"] = 1.5
+    plt.rcParams["figure.dpi"] = 150
+
     fig, ax = plt.subplots(5, 5, figsize=(14, 14))
     plot_software_results_on_axis(ax[0], results['sygnovia'], name='Sygno.via', title=True)
     plot_software_results_on_axis(ax[1], results['nlr'], name='NLR')

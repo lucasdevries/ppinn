@@ -130,6 +130,9 @@ def load_data(gaussian_filter_type, sd=2.5,
         print('Data mode: nlr...')
     else:
         raise NotImplementedError('Data method not implemented.')
+
+    data_dict = undersample(data_dict)
+
     data_dict['perfusion_values_dict'] = perfusion_values_dict
     return data_dict
 
@@ -339,6 +342,10 @@ def get_tensors(data_dict):
         data_dict[key] = torch.as_tensor(data_dict[key], dtype=torch.float32)
     return data_dict
 
+def undersample(data_dict, degree):
+    assert degree in [0.50, 0.75]
+    print(data_dict.keys())
+    return data_dict
 
 def apply_gaussian_filter(type, array, sd):
     truncate = np.ceil(2 * sd) / sd if sd != 0 else 0
