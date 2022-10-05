@@ -1,0 +1,20 @@
+program: main.py
+method: grid
+parameters:
+  lw_res:
+    values:
+      - 250
+  data:
+    values:
+      - 'ISLES'
+  epochs:
+    values:
+      - 25
+  sd:
+    values:
+      - 2
+command:
+  - ${env}
+  - python
+  - ${program}
+  - configs\config.json

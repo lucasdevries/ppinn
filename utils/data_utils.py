@@ -18,7 +18,8 @@ def load_data(gaussian_filter_type, sd=2.5,
               method='ppinn',
               temporal_smoothing=False,
               save_nifti=False,
-              baseline_zero=False):
+              baseline_zero=False,
+              undersampling=0.0):
     print("Reading Dicom directory:", folder)
     reader = sitk.ImageSeriesReader()
     dicom_names = reader.GetGDCMSeriesFileNames(folder)
@@ -27,7 +28,11 @@ def load_data(gaussian_filter_type, sd=2.5,
     image_data = sitk.GetArrayFromImage(image)
     # values: AIF/VOF, Exp R(t) for CBV 1-5, Lin R(t) for CBV 1-5, Box R(t) for CBV 1-5,
     image_data = rearrange(image_data, '(t values) h w -> values t h w', t=30)
+
     image_data = image_data.astype(np.float32)
+    time = np.array([float(x) for x in range(0, 60, 2)])
+    if undersampling:
+        image_data, time = undersample(image_data, time, undersampling)
     # if gaussian_filter_type and (method == 'nlr'):
     #     print('filter entire scan')
     #     image_data = apply_gaussian_filter(gaussian_filter_type, image_data.copy(), sd=sd)
@@ -45,16 +50,21 @@ def load_data(gaussian_filter_type, sd=2.5,
                aif_location[0]:aif_location[0] + aif_location[2],
                aif_location[1]:aif_location[1] + aif_location[2]]
     aif_data = np.mean(aif_data, axis=(1, 2))
+    print(aif_data)
     if method == 'ppinn' or method == 'nlr':
         # Correct aif for partial volume effect
-        vof_baseline = np.mean(vof_data[:4])
-        aif_baseline = np.mean(aif_data[:4])
+        vof_baseline = np.mean(vof_data[:4]) if undersampling == 0.0 else np.mean(vof_data[:2])
+        aif_baseline = np.mean(aif_data[:4]) if undersampling == 0.0 else np.mean(vof_data[:2])
+        if undersampling == 0.25:
+            aif_baseline = np.mean(aif_data[:1])
+            vof_baseline = np.mean(vof_data[:1])
         aif_wo_baseline = aif_data - aif_baseline
         vof_wo_baseline = vof_data - vof_baseline
         cumsum_aif = np.cumsum(aif_wo_baseline)[-1]
         cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
         ratio = cumsum_vof / cumsum_aif
         aif_data = aif_wo_baseline * ratio + aif_baseline
+        print(aif_data)
 
     if baseline_zero:
         aif_baseline = np.mean(aif_data[:4])
@@ -111,7 +121,6 @@ def load_data(gaussian_filter_type, sd=2.5,
     perfusion_values_dict['tmax'] = perfusion_values_dict['delay'] + 0.5 * perfusion_values_dict['mtt']
     perfusion_data = rearrange(perfusion_data, '(n cbv) t h w -> n cbv h w t', n=3)
 
-    time = np.array([float(x) for x in range(0, 60, 2)])
     time_inference_highres = np.array([float(x) for x in np.arange(0, 60, 0.1)])
 
     data_dict = {'aif': aif_data,
@@ -131,7 +140,7 @@ def load_data(gaussian_filter_type, sd=2.5,
     else:
         raise NotImplementedError('Data method not implemented.')
 
-    data_dict = undersample(data_dict)
+    # data_dict = undersample(data_dict, undersampling)
 
     data_dict['perfusion_values_dict'] = perfusion_values_dict
     return data_dict
@@ -140,10 +149,9 @@ def load_data(gaussian_filter_type, sd=2.5,
 def load_data_ISLES(filter_type, sd=2.5,
                     folder=r'data/ISLES2018',
                     folder_aif=r'data/AIFNET',
-
                     method='ppinn',
                     temporal_smoothing=False,
-                    save_nifti=True,
+                    save_nifti=False,
                     baseline_zero=False,
                     mode='train',
                     case='case_3'):
@@ -268,6 +276,8 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     vof_data = np.sum(np.multiply(vof_location, image_data_dict['array']), axis=(1,2,3)) / np.sum(vof_location)
     aif_time_data = time_data[time_aif_location]
     vof_time_data = time_data[time_vof_location]
+
+
     # scale aif
     vof_baseline = np.mean(vof_data[:4])
     aif_baseline = np.mean(aif_data[:4])
@@ -278,6 +288,8 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     cumsum_vof = simpson(vof_wo_baseline, vof_time_data)
     ratio = cumsum_vof / cumsum_aif
     aif_data = aif_wo_baseline * ratio + aif_baseline
+
+
     image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
     # If smoothing, apply here
     if gaussian_filter_type:
@@ -342,10 +354,36 @@ def get_tensors(data_dict):
         data_dict[key] = torch.as_tensor(data_dict[key], dtype=torch.float32)
     return data_dict
 
-def undersample(data_dict, degree):
-    assert degree in [0.50, 0.75]
-    print(data_dict.keys())
-    return data_dict
+# def undersample(data_dict, degree):
+#     assert degree in [0, 0.50, 0.25]
+#     if degree == 0:
+#         return data_dict
+#     frames = len(data_dict['aif'])
+#     if degree == 0.50:
+#         indices = np.arange(0, frames, 2)
+#     elif degree == 0.25:
+#         indices = np.arange(0, frames, 4)
+#     else:
+#         raise NotImplementedError('Amount of undersampling not implemented')
+#     data_dict['aif'] = data_dict['aif'][indices]
+#     data_dict['vof'] = data_dict['vof'][indices]
+#     data_dict['time'] = data_dict['time'][indices]
+#     data_dict['curves'] = data_dict['curves'][...,indices]
+#     return data_dict
+def undersample(image_data, time, degree):
+    assert degree in [0, 0.50, 0.25]
+    if degree == 0:
+        return image_data, time
+    frames = len(time)
+    if degree == 0.50:
+        indices = np.arange(0, frames, 2)
+    elif degree == 0.25:
+        indices = np.arange(0, frames, 4)
+    else:
+        raise NotImplementedError('Amount of undersampling not implemented')
+    image_data = image_data[:,indices,...]
+    time = time[indices]
+    return image_data, time
 
 def apply_gaussian_filter(type, array, sd):
     truncate = np.ceil(2 * sd) / sd if sd != 0 else 0
@@ -421,12 +459,14 @@ def save_perfusion_parameters_amc(config, case, cbf_results, cbv_results, mtt_re
 
     tmax_results = np2itk(tmax_results, template)
     sitk.WriteImage(tmax_results, os.path.join(wandb.run.dir, 'results', case, 'tmax.nii'))
+
 def save_perfusion_parameters(config, case, cbf_results, cbv_results, mtt_results, delay_results, tmax_results):
     mode = 'TRAINING' if config.mode == 'train' else 'TESTING'
     folder = r'data/ISLES2018'
 
-    template_file = glob.glob(os.path.join(folder, mode, case, '*CBF*', '*CBF*.nii'))[0]
+    template_file = glob.glob(os.path.join(folder, mode, case, '*OT*', '*OT*.nii'))[0]
     template = sitk.ReadImage(template_file)
+    sitk.WriteImage(template, os.path.join(wandb.run.dir, 'results', case, 'dwi_seg.nii'))
 
     cbf_results = np2itk(cbf_results, template)
     sitk.WriteImage(cbf_results, os.path.join(wandb.run.dir, 'results', case, 'cbf.nii'))

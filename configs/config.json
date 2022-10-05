@@ -15,9 +15,9 @@
   "bn" : false,
   "batch_size": 16,
   "optimizer": "Adam",
-  "epochs": 1000,
+  "epochs": 3,
   "filter_type": "gauss_spatial",
-  "sd": 4,
+  "sd": 2,
   "plot_params_every": 2000,
   "delay_type": "learned",
   "cbf_type": "learned",
@@ -27,6 +27,7 @@
   "baseline_zero": false,
   "drop_edges": true,
   "drop_unphysical": true,
-  "data": "phantom"
+  "data": "ISLES",
+  "undersampling": 0.0
 }
 

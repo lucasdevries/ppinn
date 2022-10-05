@@ -5,8 +5,13 @@ import wandb
 import os
 from einops.einops import repeat
 import pandas as pd
-def load_nlr_results(cbv_ml=5, sd=2):
-    result = sitk.ReadImage(rf'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\nlr_results\nlr_sd_{sd}.nii')
+def load_nlr_results(cbv_ml=5, sd=2, undersample=False):
+    if not undersample:
+
+        result = sitk.ReadImage(rf'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\nlr_results\nlr_sd_{sd}.nii')
+    else:
+        result = sitk.ReadImage(rf'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\nlr_results\nlr_sd_{sd}_subsampled05.nii')
+
     result = sitk.GetArrayFromImage(result)
     result = result[:,cbv_ml-1,:,:]
     density = 1.05
@@ -24,12 +29,12 @@ def load_nlr_results(cbv_ml=5, sd=2):
             'delay': delay,
             'tmax': tmax}
 
-# def read_dcm(folder):
-#     reader = sitk.ImageSeriesReader()
-#     dicom_names = reader.GetGDCMSeriesFileNames(folder)
-#     reader.SetFileNames(dicom_names)
-#     image = reader.Execute()
-#     return image
+def read_dcm_folder(folder):
+    reader = sitk.ImageSeriesReader()
+    dicom_names = reader.GetGDCMSeriesFileNames(folder)
+    reader.SetFileNames(dicom_names)
+    image = reader.Execute()
+    return image
 def read_dcm(folder):
     reader = sitk.ImageSeriesReader()
     dicom_names = reader.GetGDCMSeriesFileNames(folder)
@@ -44,37 +49,47 @@ def read_dcm(folder):
         image = reader.Execute()
         data_dict[name] = image
     return data_dict
-# def load_sygnovia_results(cbv_ml=5, sd=2):
-#     sd = 2
-#     simulated_data_size = 32 * 7
-#     scan_center = 512 // 2
-#     simulated_data_start = scan_center - simulated_data_size // 2
-#     simulated_data_end = scan_center + simulated_data_size // 2
-#     data = {}
-#     data['cbf'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/CBF')
-#     data['cbv'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/CBV')
-#     data['mtt'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/MTT')
-#     data['tmax'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/Tmax')
-#     data['ttd'] = read_dcm(rf'data/phantom_sygnovia_sd{sd}/TTD')
-#     data['delay'] = data['tmax'] - 0.5 * data['mtt']
-#
-#     for key, val in data.items():
-#         array = sitk.GetArrayFromImage(val)[11:]
-#         array = array[cbv_ml-1]
-#         data[key] = array[simulated_data_start:simulated_data_end, simulated_data_start:simulated_data_end]
-#     return data
-def load_sygnovia_results(cbv_ml=5, sd=2):
+
+def load_sygnovia_results(cbv_ml=5, sd=2, undersample=False):
     simulated_data_size = 32 * 7
     scan_center = 512 // 2
     simulated_data_start = scan_center - simulated_data_size // 2
     simulated_data_end = scan_center + simulated_data_size // 2
-    data = read_dcm(rf'data/sygnovia_results/sd{sd}')
+    if not undersample:
+        data = read_dcm(rf'data/sygnovia_results/sd{sd}')
+    else:
+        data = read_dcm(rf'data/sygnovia_results/sd{sd}_undersample_05')
     # data['delay_cal'] = data['tmax'] - 0.5 * data['mtt']
     for key, val in data.items():
         array = sitk.GetArrayFromImage(val)[11:]
         array = array[cbv_ml-1]
         data[key] = array[simulated_data_start:simulated_data_end, simulated_data_start:simulated_data_end]
     return data
+
+def load_sygnovia_results_amc(case):
+    base_folder = "D:\PPINN_patient_data\AMCCTP\sygnovia"
+    data_dict = {}
+    data_dict['baseline'] = read_dcm_folder(rf"{base_folder}\{case}\Basic_Baseline")
+    data_dict['avg'] = read_dcm_folder(rf"{base_folder}\{case}\Basic_Average")
+    data_dict['cbf'] = read_dcm_folder(rf"{base_folder}\{case}\Results_CBFD")
+    data_dict['cbv'] = read_dcm_folder(rf"{base_folder}\{case}\Results_CBVD")
+    data_dict['mtt'] = read_dcm_folder(rf"{base_folder}\{case}\Results_MTTD")
+    data_dict['tmax'] = read_dcm_folder(rf"{base_folder}\{case}\Results_TMAXD")
+    data_dict['delay'] = data_dict['tmax'] - 0.5*data_dict['mtt']
+    data_dict['core'] = read_dcm_folder(rf"{base_folder}\{case}\PenumbraCore_setting2\CoreBinaryMap")
+    data_dict['penumbra'] = read_dcm_folder(rf"{base_folder}\{case}\PenumbraCore_setting2\PenumbraBinaryMap")
+    os.makedirs(rf"{base_folder}\{case}\nifti", exist_ok=True)
+    for key, val in data_dict.items():
+        sitk.WriteImage(val, rf"{base_folder}\{case}\nifti\{key}.nii.gz")
+    for key, val in data_dict.items():
+        array = sitk.GetArrayFromImage(val)
+        array[array<0] = 0
+        # empty = np.zeros_like(array)
+        # empty[array >= 0] = array[array >= 0]
+        data_dict[key] = array
+
+    return data_dict
+
 def load_phantom_gt(cbv_ml=5, simulation_method=2):
     perfusion_values = np.empty([5, 7, 7, 4])
     cbv = [1, 2, 3, 4, 5]  # in ml / 100g
@@ -95,7 +110,91 @@ def load_phantom_gt(cbv_ml=5, simulation_method=2):
                              'mtt': perfusion_values[simulation_method, cbv_ml-1, ..., 2] * 60}
     perfusion_values_dict['tmax'] = perfusion_values_dict['delay'] + 0.5 * perfusion_values_dict['mtt']
     return perfusion_values_dict
+def visualize_amc_sygno(case, slice, result_dict, data_dict):
+    font = {'family': 'serif',
+            'color': 'black',
+            'weight': 'normal',
+            'size': 15,
+            }
+    plt.rcParams["font.family"] = "serif"
+    plt.rcParams["axes.linewidth"] = 1.0
+    plt.rcParams["figure.dpi"] = 150
 
+    dwi_segmentation = sitk.GetArrayFromImage(data_dict['dwi_segmentation'])[slice]
+    cbf_results = result_dict['cbf'][slice]
+    cbv_results = result_dict['cbv'][slice]
+    mtt_results = result_dict['mtt'][slice]
+    delay_results = result_dict['delay'][slice]
+    tmax_results = result_dict['tmax'][slice]
+    sygno_segmentation = result_dict['core'][slice]
+    penumbra_segmentation = result_dict['penumbra'][slice]
+
+    if np.sum(cbf_results) == 0:
+        return
+    fig, ax = plt.subplots(1, 8, figsize = (10,5))
+
+    ax[0].set_title('CBF', fontdict=font)
+    im = ax[0].imshow(cbf_results, vmin=np.percentile(cbf_results[cbf_results>0],10), vmax=np.percentile(cbf_results[cbf_results>0],90), cmap='jet')
+    cax = ax[0].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('ml/100g/min', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[1].set_title('MTT', fontdict=font)
+    im = ax[1].imshow(mtt_results, vmin=np.percentile(mtt_results[mtt_results>0],10), vmax=np.percentile(mtt_results[mtt_results>0],90), cmap='jet')
+    cax = ax[1].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('seconds', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[2].set_title('CBV', fontdict=font)
+    im = ax[2].imshow(cbv_results, vmin=np.percentile(cbv_results[cbv_results>0],10), vmax=np.percentile(cbv_results[cbv_results>0],90), cmap='jet')
+    cax = ax[2].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('ml/100g', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[3].set_title('Delay', fontdict=font)
+    im = ax[3].imshow(delay_results, vmin=np.percentile(delay_results[delay_results>0],10), vmax=np.percentile(delay_results[delay_results>0],90), cmap='jet')
+    cax = ax[3].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('s', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[4].set_title('Tmax', fontdict=font)
+    im = ax[4].imshow(tmax_results, vmin=np.percentile(tmax_results[tmax_results>0],10), vmax=np.percentile(tmax_results[tmax_results>0],90), cmap='jet')
+    cax = ax[4].inset_axes([0, -0.2, 1, 0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('s', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    ax[5].set_title('S. pen.', fontdict=font)
+    im = ax[5].imshow(penumbra_segmentation, vmin=0, vmax=2, cmap='jet')
+
+    ax[6].set_title('S. core', fontdict=font)
+    im = ax[6].imshow(sygno_segmentation, vmin=0, vmax=2, cmap='jet')
+
+    ax[7].set_title('DWI seg', fontdict=font)
+    im = ax[7].imshow(dwi_segmentation, vmin=0, vmax=2, cmap='jet')
+    # cax = ax[5].inset_axes([0, -0.2, 1, 0.1])
+    # bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    # bar.outline.set_color('black')
+    # bar.set_label('s', fontdict=font)
+    # bar.ax.tick_params(labelsize=14)
+
+    for i in range(7):
+        ax[i].set_axis_off()
+    for x in ax.flatten():
+        x.axes.xaxis.set_ticks([])
+        x.axes.yaxis.set_ticks([])
+    wandb.log({"results_sygno_{}".format(case): plt})
+    # plt.show()
+    plt.close()
 def visualize_amc(case, slice, result_dict, data_dict):
     font = {'family': 'serif',
             'color': 'black',
@@ -199,7 +298,7 @@ def visualize(slice, case, perfusion_values, result_dict):
 
     ax[0, 0].set_title('CBF', fontdict=font)
 
-    im = ax[0, 0].imshow(cbf_results[0], vmin=np.percentile(cbf_results[0][cbf_results[0]>0],10), vmax=np.percentile(cbf_results[0][cbf_results[0]>0],90), cmap='jet')
+    im = ax[0, 0].imshow(cbf_results, vmin=np.percentile(cbf_results[cbf_results>0],10), vmax=np.percentile(cbf_results[cbf_results>0],90), cmap='jet')
     cax = ax[0, 0].inset_axes([0, -0.2, 1, 0.1])
     bar = fig.colorbar(im, cax=cax, orientation="horizontal")
     bar.outline.set_color('black')
@@ -215,7 +314,7 @@ def visualize(slice, case, perfusion_values, result_dict):
 
     ax[0, 1].set_title('MTT', fontdict=font)
 
-    im = ax[0, 1].imshow(mtt_results[0], vmin=np.percentile(mtt_results[0][mtt_results[0]>0],10), vmax=np.percentile(mtt_results[0][mtt_results[0]>0],90), cmap='jet')
+    im = ax[0, 1].imshow(mtt_results, vmin=np.percentile(mtt_results[mtt_results>0],10), vmax=np.percentile(mtt_results[mtt_results>0],90), cmap='jet')
     cax = ax[0, 1].inset_axes([0, -0.2, 1, 0.1])
     bar = fig.colorbar(im, cax=cax, orientation="horizontal")
     bar.outline.set_color('black')
@@ -231,7 +330,7 @@ def visualize(slice, case, perfusion_values, result_dict):
 
     ax[0, 2].set_title('CBV', fontdict=font)
 
-    im = ax[0, 2].imshow(cbv_results[0], vmin=np.percentile(cbv_results[0][cbv_results[0]>0],10), vmax=np.percentile(cbv_results[0][cbv_results[0]>0],90), cmap='jet')
+    im = ax[0, 2].imshow(cbv_results, vmin=np.percentile(cbv_results[cbv_results>0],10), vmax=np.percentile(cbv_results[cbv_results>0],90), cmap='jet')
     cax = ax[0, 2].inset_axes([0, -0.2, 1, 0.1])
     bar = fig.colorbar(im, cax=cax, orientation="horizontal")
     bar.outline.set_color('black')
@@ -246,7 +345,7 @@ def visualize(slice, case, perfusion_values, result_dict):
     bar.ax.tick_params(labelsize=14)
 
     ax[0, 3].set_title('Tmax', fontdict=font)
-    im = ax[0, 3].imshow(tmax_results[0], vmin=np.percentile(tmax_results[0][tmax_results[0]>0],10), vmax=np.percentile(tmax_results[0][tmax_results[0]>0],90), cmap='jet')
+    im = ax[0, 3].imshow(tmax_results, vmin=np.percentile(tmax_results[tmax_results>0],10), vmax=np.percentile(tmax_results[tmax_results>0],90), cmap='jet')
     cax = ax[0, 3].inset_axes([0, -0.2, 1, 0.1])
     bar = fig.colorbar(im, cax=cax, orientation="horizontal")
     bar.outline.set_color('black')
@@ -260,7 +359,7 @@ def visualize(slice, case, perfusion_values, result_dict):
     bar.ax.tick_params(labelsize=14)
 
     ax[0, 4].set_title('Delay', fontdict=font)
-    im = ax[0, 4].imshow(delay_results[0], vmin=np.percentile(delay_results[0][delay_results[0]>0],10), vmax=np.percentile(delay_results[0][delay_results[0]>0],90), cmap='jet')
+    im = ax[0, 4].imshow(delay_results, vmin=np.percentile(delay_results[delay_results>0],10), vmax=np.percentile(delay_results[delay_results>0],90), cmap='jet')
     cax = ax[0, 4].inset_axes([0, -0.2, 1, 0.1])
     bar = fig.colorbar(im, cax=cax, orientation="horizontal")
     bar.outline.set_color('black')
@@ -298,7 +397,7 @@ def visualize(slice, case, perfusion_values, result_dict):
     ax[1, 0].set_ylabel('ISLES/Rapid', fontdict=font)
     # plt.tight_layout()
     wandb.log({"results_{}".format(case): plt})
-    # plt.show()
+
     plt.close()
 
 
@@ -421,13 +520,27 @@ def plot_software_results_on_axis(ax, results_dict, name='Sygno.via', title=Fals
     for x in ax.flatten():
         x.axes.xaxis.set_ticks([])
         x.axes.yaxis.set_ticks([])
-def plot_software_difference_on_axis(ax, results_dict, gt_dict, name='Sygno.via', title=False):
+def plot_software_difference_on_axis(ax, results_dict, gt_dict, name='Sygno.via', title=False, error=None):
 
-    cbf = results_dict['cbf'] - gt_dict['cbf']
-    cbv = results_dict['cbv'] - gt_dict['cbv']
-    mtt = results_dict['mtt'] - gt_dict['mtt']
-    tmax = results_dict['tmax'] - gt_dict['tmax']
-    delay = results_dict['delay'] - gt_dict['delay']
+    if error == 'nmse':
+        cbf = ((results_dict['cbf'] - gt_dict['cbf'])/gt_dict['cbf'])**2
+        cbv = ((results_dict['cbv'] - gt_dict['cbv'])/gt_dict['cbv'])**2
+        mtt = ((results_dict['mtt'] - gt_dict['mtt'])/gt_dict['mtt'])**2
+        tmax = ((results_dict['tmax'] - gt_dict['tmax'])/gt_dict['tmax'])**2
+        delay = ((results_dict['delay'] - gt_dict['delay'])/gt_dict['delay'])**2
+
+    elif error == 'nmae':
+        cbf = np.abs(((results_dict['cbf'] - gt_dict['cbf'])/gt_dict['cbf']))
+        cbv = np.abs(((results_dict['cbv'] - gt_dict['cbv'])/gt_dict['cbv']))
+        mtt = np.abs(((results_dict['mtt'] - gt_dict['mtt'])/gt_dict['mtt']))
+        tmax = np.abs(((results_dict['tmax'] - gt_dict['tmax'])/gt_dict['tmax']))
+        delay = np.abs(((results_dict['delay'] - gt_dict['delay'])/gt_dict['delay']))
+    else:
+        cbf = results_dict['cbf'] - gt_dict['cbf']
+        cbv = results_dict['cbv'] - gt_dict['cbv']
+        mtt = results_dict['mtt'] - gt_dict['mtt']
+        tmax = results_dict['tmax'] - gt_dict['tmax']
+        delay = results_dict['delay'] - gt_dict['delay']
 
     font = {'family': 'serif',
             'color': 'black',
@@ -447,12 +560,18 @@ def plot_software_difference_on_axis(ax, results_dict, gt_dict, name='Sygno.via'
         ax[4].set_title('Tmax', fontdict=font)
 
     ax[0].set_ylabel(f'{name}', fontdict=font)
-    ax[0].imshow(cbf, vmin=-10, vmax=10, cmap='jet')
-    ax[1].imshow(mtt, vmin=-2, vmax=2, cmap='jet')
-    ax[2].imshow(cbv, vmin=-1, vmax=1, cmap='jet')
-    ax[3].imshow(delay, vmin=-1, vmax=1, cmap='jet')
-    ax[4].imshow(tmax, vmin=-1, vmax=1, cmap='jet')
-
+    if not error:
+        ax[0].imshow(cbf, vmin=-10, vmax=10, cmap='jet')
+        ax[1].imshow(mtt, vmin=-2, vmax=2, cmap='jet')
+        ax[2].imshow(cbv, vmin=-1, vmax=1, cmap='jet')
+        ax[3].imshow(delay, vmin=-1, vmax=1, cmap='jet')
+        ax[4].imshow(tmax, vmin=-1, vmax=1, cmap='jet')
+    else:
+        ax[0].imshow(cbf,vmin=-1,vmax=1, cmap='jet')
+        ax[1].imshow(mtt,vmin=-1,vmax=1, cmap='jet')
+        ax[2].imshow(cbv,vmin=-1,vmax=1, cmap='jet')
+        ax[3].imshow(delay,vmin=-1,vmax=1, cmap='jet')
+        ax[4].imshow(tmax,vmin=-1,vmax=1, cmap='jet')
     for x in ax.flatten():
         x.axes.xaxis.set_ticks([])
         x.axes.yaxis.set_ticks([])
@@ -605,6 +724,79 @@ def add_colorbars_to_fig_difference(fig, ax, gt_axis):
         x.axes.yaxis.set_ticks([])
     # plt.tight_layout()
 
+def add_colorbars_to_fig_difference_free(fig, ax, gt_axis):
+    # cbf = resdict['cbf']
+    # cbv = resdict['cbv']
+    # mtt = resdict['mtt']
+    # delay = resdict['delay']
+    # tmax = resdict['tmax']
+    cbar_axis = gt_axis + 1
+    font = {'family': 'serif',
+            'color': 'black',
+            'weight': 'normal',
+            'size': 15,
+            }
+    plt.rcParams["font.family"] = "serif"
+    plt.rcParams["axes.linewidth"] = 1.5
+    plt.rcParams["figure.dpi"] = 150
+    # [x0, y0, width, height]
+    im = ax[gt_axis, 0].imshow(np.zeros((224,224)),vmin=-1,vmax=1, cmap='jet')
+    cax = ax[cbar_axis, 0].inset_axes([0,
+                                       ax[gt_axis,0].get_position().y0+0.7,
+                                       1,
+                                       0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('ml/100g/min', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+    ax[gt_axis, 0].set_ylabel('GT', fontdict=font)
+    ax[gt_axis, 1].set_ylabel(' ', fontdict=font)
+    im = ax[gt_axis, 1].imshow(np.zeros((224,224)),vmin=-1,vmax=1, cmap='jet')
+    cax = ax[cbar_axis, 1].inset_axes([0,
+                                       ax[gt_axis,0].get_position().y0+0.7,
+                                       1,
+                                       0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('seconds', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    im = ax[gt_axis, 2].imshow(np.zeros((224,224)),vmin=-1,vmax=1, cmap='jet')
+    cax = ax[cbar_axis, 2].inset_axes([0,
+                                       ax[gt_axis,0].get_position().y0+0.7,
+                                       1,
+                                       0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('ml/100g', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    im = ax[gt_axis, 3].imshow(np.zeros((224,224)),vmin=-1,vmax=1, cmap='jet')
+    cax = ax[cbar_axis, 3].inset_axes([0,
+                                       ax[gt_axis,0].get_position().y0+0.7,
+                                       1,
+                                       0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('seconds', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    im = ax[gt_axis, 4].imshow(np.zeros((224,224)),vmin=-1,vmax=1, cmap='jet')
+    cax = ax[cbar_axis, 4].inset_axes([0,
+                                       ax[gt_axis,0].get_position().y0+0.7,
+                                       1,
+                                       0.1])
+    bar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    bar.outline.set_color('black')
+    bar.set_label('seconds', fontdict=font)
+    bar.ax.tick_params(labelsize=14)
+
+    for i in range(5):
+        ax[cbar_axis, i].set_axis_off()
+    for x in ax.flatten():
+        x.axes.xaxis.set_ticks([])
+        x.axes.yaxis.set_ticks([])
+    # plt.tight_layout()
 
 def log_software_results(results, cbv_ml, corrected=False):
     for metric in ['mse', 'mae', 'me']:
@@ -687,8 +879,30 @@ def plot_results(results, corrected=False):
     os.makedirs(os.path.join(wandb.run.dir, 'plots'), exist_ok=True)
     plt.savefig(os.path.join(wandb.run.dir, 'plots', f'software_vs_gt_difference.png'), dpi=150)
     wandb.log({"results_compare_difference": plt}) if not corrected else wandb.log({"results_compare_difference_cor": plt})
-    # plt.show()
 
+    # fig, ax = plt.subplots(4, 5, figsize=(14, 14))
+    # add_colorbars_to_fig_difference_free(fig, ax, 2)
+    # plot_software_difference_on_axis(ax[0], results['sygnovia'], results['gt'], name='Sygno.via', title=True, error='nmse')
+    # plot_software_difference_on_axis(ax[1], results['nlr'], results['gt'], name='NLR', error='nmse')
+    # plot_software_difference_on_axis(ax[2], results['ppinn'], results['gt'], name='PPINN', error='nmse')
+    # ax = color_axes(ax)
+    #
+    # # plt.tight_layout()
+    # os.makedirs(os.path.join(wandb.run.dir, 'plots'), exist_ok=True)
+    # plt.savefig(os.path.join(wandb.run.dir, 'plots', f'software_vs_gt_difference_nmse.png'), dpi=150)
+    # wandb.log({"results_compare_difference_nmse": plt}) if not corrected else wandb.log({"results_compare_difference_cor_nmse": plt})
+    #
+    # fig, ax = plt.subplots(4, 5, figsize=(14, 14))
+    # add_colorbars_to_fig_difference_free(fig, ax, 2)
+    # plot_software_difference_on_axis(ax[0], results['sygnovia'], results['gt'], name='Sygno.via', title=True, error='nmae')
+    # plot_software_difference_on_axis(ax[1], results['nlr'], results['gt'], name='NLR', error='nmae')
+    # plot_software_difference_on_axis(ax[2], results['ppinn'], results['gt'], name='PPINN', error='nmae')
+    # ax = color_axes(ax)
+    #
+    # # plt.tight_layout()
+    # os.makedirs(os.path.join(wandb.run.dir, 'plots'), exist_ok=True)
+    # plt.savefig(os.path.join(wandb.run.dir, 'plots', f'software_vs_gt_difference_nmae.png'), dpi=150)
+    # wandb.log({"results_compare_difference_nmae": plt}) if not corrected else wandb.log({"results_compare_difference_cor_nmae": plt})
 def color_axes(ax):
     ax[1,0].spines['bottom'].set_color('red')
     ax[1,0].spines['top'].set_color('red')

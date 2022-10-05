@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from models.MLP_isles import MLP
+from models.MLP_amc import MLP
 from utils.train_utils import AverageMeter, weightConstraint
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
@@ -19,7 +19,10 @@ class PPINN_isles(nn.Module):
                  shape_in,
                  perfusion_values,
                  n_inputs=1,
-                 std_t=1):
+                 std_t=1,
+                 original_data_shape=None,
+                 original_indices=None
+                 ):
         super(PPINN_isles, self).__init__()
         self.config = config
         self.PID = os.getpid()
@@ -42,6 +45,8 @@ class PPINN_isles(nn.Module):
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
+        self.original_data_shape = original_data_shape
+        self.original_data_indices = original_indices
         self.perfusion_values = perfusion_values
         self.std_t = std_t
         self.neurons_out = 1
@@ -211,7 +216,12 @@ class PPINN_isles(nn.Module):
             epochs):
         data_time = data_dict['time'].to(self.device)
         data_aif = data_dict['aif'].to(self.device)
-        data_curves = data_dict['curves'][slice:slice+1].to(self.device)
+        # data_curves = data_dict['curves'][slice:slice+1].to(self.device)
+        data_curves = data_dict['curves'][slice:slice+1]
+        data_curves = data_curves[0][self.original_data_indices].unsqueeze(1).unsqueeze(0)
+        data_curves = data_curves.to(self.device)
+
+
         data_collopoints = data_dict['coll_points'].to(self.device)
         data_boundary = data_dict['bound'].to(self.device)
         collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True, drop_last=True)
@@ -242,37 +252,37 @@ class PPINN_isles(nn.Module):
                        "residual_loss": epoch_residual_loss.avg,
                        "lr": self.optimizer.param_groups[0]['lr'],
                        }
-            if ep in [3,10, 20, 30, 40, 50, 100]:
-                data_time_inf = data_dict['time_inference_highres'].to(self.device)
-                aif_inf, tac_inf = self.forward_NNs(data_time_inf)
-                colors = ['k', 'r', 'b', 'g']
-                for i in range(4):
-                    plt.plot(data_dict['time_inference_highres'], tac_inf[0,128+i,128].cpu().detach().numpy(), c=colors[i])
-                    plt.scatter(data_dict['time'], data_dict['curves'][slice,128+i,128].cpu().detach().numpy(), c=colors[i])
-                plt.show()
-                np.save(f'aif_estimates_{ep}.npy', aif_inf.cpu().detach().numpy())
-                np.save(f'tacs_estimates_{ep}.npy', tac_inf.cpu().detach().numpy())
-                np.save('tacs.npy', data_dict['curves'][slice].cpu().detach().numpy())
-                np.save('aif.npy', data_dict['aif'].cpu().detach().numpy())
-
-                sitk.WriteImage(sitk.GetImageFromArray(tac_inf[0].cpu().detach().numpy()),f'estimates_{ep}.nii')
-                sitk.WriteImage(sitk.GetImageFromArray(data_dict['curves'][slice].cpu().detach().numpy()),f'curves{ep}.nii')
-
-
-
-
-
+            # if ep in [24, 30, 40, 50, 100]:
+            #     data_time_inf = data_dict['time_inference_highres'].to(self.device)
+            #     aif_inf, tac_inf = self.forward_NNs(data_time_inf)
+            #     colors = ['k', 'r', 'b', 'g']
+            #     for i in range(4):
+            #         plt.plot(data_dict['time_inference_highres'], tac_inf[0,128+i,128].cpu().detach().numpy(), c=colors[i])
+            #         plt.scatter(data_dict['time'], data_dict['curves'][slice,128+i,128].cpu().detach().numpy(), c=colors[i])
+            #     plt.show()
             # wandb.log(metrics, step=self.current_iteration)
 
             # if ep % self.config.plot_params_every == 0:
             #     self.plot_params(slice, ep, brainmask)
             self.current_iteration += 1
 
-        brainmask = brainmask[slice:slice+1].to(self.device)
-        cbf = brainmask * self.get_cbf(seconds=False).squeeze(-1)
-        mtt = brainmask * self.get_mtt(seconds=True).squeeze(-1)
-        mtt_min = brainmask * self.get_mtt(seconds=False).squeeze(-1)
-        delay = brainmask * self.get_delay(seconds=True).squeeze(-1).squeeze(-1)
+        # brainmask = brainmask[slice:slice+1].to(self.device)
+        # cbf = brainmask * self.get_cbf(seconds=False).squeeze(-1)
+        # mtt = brainmask * self.get_mtt(seconds=True).squeeze(-1)
+        # mtt_min = brainmask * self.get_mtt(seconds=False).squeeze(-1)
+        # delay = brainmask * self.get_delay(seconds=True).squeeze(-1).squeeze(-1)
+        # cbv = cbf * mtt_min
+        # tmax = delay + 0.5*mtt
+        #
+        cbf = torch.zeros(self.original_data_shape).to(self.device)
+        mtt = torch.zeros(self.original_data_shape).to(self.device)
+        mtt_min = torch.zeros(self.original_data_shape).to(self.device)
+        delay = torch.zeros(self.original_data_shape).to(self.device)
+
+        cbf[self.original_data_indices] = self.get_cbf(seconds=False).squeeze()
+        mtt[self.original_data_indices] = self.get_mtt(seconds=True).squeeze()
+        mtt_min[self.original_data_indices] = self.get_mtt(seconds=False).squeeze()
+        delay[self.original_data_indices] = self.get_delay(seconds=True).squeeze()
         cbv = cbf * mtt_min
         tmax = delay + 0.5*mtt
         return {'cbf': cbf,
