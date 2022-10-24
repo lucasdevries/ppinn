@@ -294,6 +294,14 @@ def visualize(slice, case, perfusion_values, result_dict):
     plt.rcParams["font.family"] = "serif"
     plt.rcParams["axes.linewidth"] = 1.5
     plt.rcParams["figure.dpi"] = 150
+
+    if np.sum(cbf_results) == 0:
+        return
+
+    if np.sum(cbv_results) == 0:
+        return
+    if np.sum(isles_cbv) == 0:
+        return
     fig, ax = plt.subplots(2, 6, figsize=(12, 6))
 
     ax[0, 0].set_title('CBF', fontdict=font)

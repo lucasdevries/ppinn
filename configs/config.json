@@ -27,7 +27,7 @@
   "baseline_zero": false,
   "drop_edges": true,
   "drop_unphysical": true,
-  "data": "ISLES",
+  "data": "phantom",
   "undersampling": 0.0
 }
 

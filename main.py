@@ -88,6 +88,7 @@ def train(config):
               epochs=config.epochs)
     ppinn.save_parameters()
     ppinn_results = ppinn.get_results()
+
     return ppinn_results
 
 
@@ -152,7 +153,7 @@ def train_amc(config):
 def train_isles(config):
     folder = 'TRAINING' if config.mode == 'train' else 'TESTING'
     cases = os.listdir(r'data/ISLES2018/{}'.format(folder))
-    for case in cases:
+    for case in cases[-7:]:
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_ISLES(filter_type=config.filter_type,
                                                sd=config.sd,
@@ -191,13 +192,14 @@ def train_isles(config):
                                     data_dict,
                                     batch_size=config.batch_size,
                                     epochs=int(config.epochs))
+            result_dict = drop_unphysical_amc(result_dict)
             cbf_results[slice, ...] = result_dict['cbf'].cpu().detach().numpy()
             cbv_results[slice, ...] = result_dict['cbv'].cpu().detach().numpy()
             mtt_results[slice, ...] = result_dict['mtt'].cpu().detach().numpy()
             delay_results[slice, ...] = result_dict['delay'].cpu().detach().numpy()
             tmax_results[slice, ...] = result_dict['tmax'].cpu().detach().numpy()
 
-            visualize(slice, case, data_dict['perfusion_values'][slice], result_dict)
+            # visualize(slice, case, data_dict['perfusion_values'][slice], result_dict)
 
         data_utils.save_perfusion_parameters(config,
                                              case,

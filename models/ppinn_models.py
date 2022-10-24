@@ -10,7 +10,7 @@ from tqdm import tqdm
 import logging
 import os
 import wandb
-
+import pickle
 from utils.val_utils import load_nlr_results
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
@@ -324,14 +324,18 @@ class PPINN(nn.Module):
         self.optimizer.step()
         return loss_aif, loss_tissue, loss_residual
 
-    def get_results(self):
+    def get_results(self, save_results=True):
         cbf = self.get_cbf(seconds=False).squeeze().cpu().detach().numpy()
         mtt = self.get_mtt(seconds=True).squeeze().cpu().detach().numpy()
         mtt_min = self.get_mtt(seconds=False).squeeze().cpu().detach().numpy()
         delay = self.get_delay(seconds=True).squeeze().cpu().detach().numpy()
         cbv = cbf * mtt_min
         tmax = delay + 0.5 * mtt
-        return {'cbf': cbf, 'cbv': cbv, 'mtt': mtt, 'delay': delay, 'tmax': tmax}
+        results_dict = {'cbf': cbf, 'cbv': cbv, 'mtt': mtt, 'delay': delay, 'tmax': tmax}
+        if save_results:
+            with open(os.path.join(wandb.run.dir, f'ppinn_results_cbv_{self.config.cbv_ml}_sd_{self.config.sd}.pickle'), 'wb') as f:
+                pickle.dump(results_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+        return results_dict
 
     def validate(self):
 
@@ -374,6 +378,7 @@ class PPINN(nn.Module):
                 with open(os.path.join(wandb.run.dir, f'{name}.npy'), 'wb') as f:
                     np.save(f, parameter_data)
 
+        # Save parameter data
     def __loss_data(self, aif, curves, c_aif, c_tissue):
         # reshape the ground truth
         aif = aif.expand(*c_aif.shape)
