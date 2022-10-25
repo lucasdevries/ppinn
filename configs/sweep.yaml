@@ -3,14 +3,18 @@ method: grid
 parameters:
   sd:
     values:
+      - 1
       - 2
+      - 3
+      - 4
+      - 5
   cbv_ml:
     values:
-      - 5
-      - 4
-      - 3
-      - 2
       - 1
+      - 2
+      - 3
+      - 4
+      - 5
   undersampling:
     values:
       - 0.0

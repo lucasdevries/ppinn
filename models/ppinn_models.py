@@ -333,7 +333,7 @@ class PPINN(nn.Module):
         tmax = delay + 0.5 * mtt
         results_dict = {'cbf': cbf, 'cbv': cbv, 'mtt': mtt, 'delay': delay, 'tmax': tmax}
         if save_results:
-            with open(os.path.join(wandb.run.dir, f'ppinn_results_cbv_{self.config.cbv_ml}_sd_{self.config.sd}.pickle'), 'wb') as f:
+            with open(os.path.join(wandb.run.dir, f'ppinn_results_cbv_{self.config.cbv_ml}_sd_{self.config.sd}_undersample_{self.config.undersampling}.pickle'), 'wb') as f:
                 pickle.dump(results_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
         return results_dict
 

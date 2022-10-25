@@ -1,5 +1,0 @@
-[default]
-entity = lucasdevries
-project = ppinn
-base_url = https://api.wandb.ai
-
