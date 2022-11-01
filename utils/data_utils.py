@@ -444,6 +444,8 @@ def save_perfusion_parameters_amc(config, case, cbf_results, cbv_results, mtt_re
     dwi_segmentation = os.path.join(r'D:/PPINN_patient_data/AMCCTP', rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
     template = sitk.ReadImage(dwi_segmentation)
     sitk.WriteImage(template, os.path.join(wandb.run.dir, 'results', case, 'dwi_seg.nii'))
+    brainmask = sitk.ReadImage(os.path.join(r'D:/PPINN_patient_data/AMCCTP', rf'CTP_nii_brainmask/{case}/brainmask.nii.gz'))
+    sitk.WriteImage(brainmask, os.path.join(wandb.run.dir, 'results', case, 'brainmask.nii'))
 
     cbf_results = np2itk(cbf_results, template)
     sitk.WriteImage(cbf_results, os.path.join(wandb.run.dir, 'results', case, 'cbf.nii'))

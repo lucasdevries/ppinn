@@ -90,7 +90,7 @@ def load_sygnovia_results_amc(case):
 
     return data_dict
 
-def load_phantom_gt(cbv_ml=5, simulation_method=2):
+def load_phantom_gt(cbv_ml=5, simulation_method=2, undersample='NA'):
     perfusion_values = np.empty([5, 7, 7, 4])
     cbv = [1, 2, 3, 4, 5]  # in ml / 100g
     mtt_s = [24.0, 12.0, 8.0, 6.0, 4.8, 4.0, 3.42857143]  # in seconds
@@ -847,7 +847,7 @@ def drop_unphysical(results):
         results[k1]['cbv'] = np.clip(results[k1]['cbv'], a_min=0, a_max=10)
         results[k1]['mtt'] = np.clip(results[k1]['mtt'], a_min=0 , a_max=30)
         results[k1]['delay'] = np.clip(results[k1]['delay'], a_min=0 , a_max=10)
-        results[k1]['tmax'] = np.clip(results[k1]['tmax'], a_min=0 , a_max=15)
+        results[k1]['tmax'] = np.clip(results[k1]['tmax'], a_min=0 , a_max=20)
     return results
 
 def drop_unphysical_amc(results):
@@ -855,7 +855,7 @@ def drop_unphysical_amc(results):
     results['cbv'] = np.clip(results['cbv'].cpu().detach().numpy(), a_min=0, a_max=10)
     results['mtt'] = np.clip(results['mtt'].cpu().detach().numpy(), a_min=0 , a_max=30)
     results['delay'] = np.clip(results['delay'].cpu().detach().numpy(), a_min=0 , a_max=10)
-    results['tmax'] = np.clip(results['tmax'].cpu().detach().numpy(), a_min=0 , a_max=15)
+    results['tmax'] = np.clip(results['tmax'].cpu().detach().numpy(), a_min=0 , a_max=20)
     return results
 
 def plot_results(results, corrected=False):

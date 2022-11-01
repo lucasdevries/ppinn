@@ -12,7 +12,7 @@ parameters:
       - 25
   sd:
     values:
-      - 4
+      - 2
 command:
   - ${env}
   - python

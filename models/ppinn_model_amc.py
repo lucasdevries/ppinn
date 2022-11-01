@@ -253,10 +253,10 @@ class PPINN_amc(nn.Module):
 
             self.scheduler.step()
 
-            metrics = {"aif_loss": epoch_aif_loss.avg,
-                       "tissue_loss": epoch_tissue_loss.avg,
-                       "residual_loss": epoch_residual_loss.avg,
-                       "lr": self.optimizer.param_groups[0]['lr'],
+            metrics = {f"aif_loss_{slice}": epoch_aif_loss.avg,
+                       f"tissue_loss_{slice}": epoch_tissue_loss.avg,
+                       f"residual_loss_{slice}": epoch_residual_loss.avg,
+                       f"lr_{slice}": self.optimizer.param_groups[0]['lr'],
                        }
             # if ep in [9]:
             #     data_time_inf = data_dict['time_inference_highres'].to(self.device)
@@ -300,7 +300,7 @@ class PPINN_amc(nn.Module):
 
 
 
-            # wandb.log(metrics, step=self.current_iteration)
+            wandb.log(metrics, step=self.current_iteration)
 
             # if ep % self.config.plot_params_every == 0:
             #     self.plot_params(slice, ep, brainmask)

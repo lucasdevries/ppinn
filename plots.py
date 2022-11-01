@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import pickle
 import numpy as np
+import os
 from utils.val_utils import drop_edges, drop_unphysical
 from utils.val_utils import load_sygnovia_results, load_nlr_results, load_phantom_gt, load_sygnovia_results_amc
 from utils.plot_utils import bland_altman_plot
@@ -18,6 +19,7 @@ plt.rcParams["font.family"] = "serif"
 plt.rcParams["axes.linewidth"] = 1.5
 plt.rcParams["figure.dpi"] = 150
 plt.rcParams["mathtext.fontset"] = 'cm'
+plt.rcParams['legend.title_fontsize'] = 12
 # plt.rcParams['text.usetex'] = True
 def load_phantom(folder=r'data/DigitalPhantomCT',cbv_ml=5, simulation_method=2):
     print("Reading Dicom directory:", folder)
@@ -77,20 +79,21 @@ def load_phantom(folder=r'data/DigitalPhantomCT',cbv_ml=5, simulation_method=2):
             }
 
 def load_ppinn_results(cbv_ml=5, sd=2, undersample=False):
-    with open(rf'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\ppinn_results\ppinn_results_cbv_{cbv_ml}_sd_{sd}.pickle', 'rb') as f:
+    us = 0.5 if undersample else 0
+    with open(rf'C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\ppinn_results\ppinn_results_cbv_{cbv_ml}_sd_{sd}_undersample_{us}.pickle', 'rb') as f:
         results = pickle.load(f)
     return results
 
-def get_data(result_dict_function, sd):
+def get_data(result_dict_function, sd, undersample=False):
     if not sd:
         data = result_dict_function(cbv_ml=1)
         for key in data.keys():
-            data[key] = np.concatenate([result_dict_function(cbv_ml=ml)[key] for ml in [1,2,3,4,5]])
+            data[key] = np.concatenate([result_dict_function(cbv_ml=ml, undersample=undersample)[key] for ml in [1,2,3,4,5]])
         return data
     else:
         data = result_dict_function(cbv_ml=1, sd=sd)
         for key in data.keys():
-            data[key] = np.concatenate([result_dict_function(cbv_ml=ml, sd=sd)[key] for ml in [1,2,3,4,5]])
+            data[key] = np.concatenate([result_dict_function(cbv_ml=ml, sd=sd, undersample=undersample)[key] for ml in [1,2,3,4,5]])
         return data
 
 def make_axes(ax):
@@ -107,17 +110,17 @@ def make_axes(ax):
     ax[0].set_yticklabels(names, minor=False, fontdict=font)
     ax[0].set_ylabel('CBV', fontdict=font)
 
-def make_grid_plot(sd, drop=False):
-    results = {'gt': get_data(load_phantom_gt, sd=None),
-               'sygnovia': get_data(load_sygnovia_results, sd=2),
-               'nlr': get_data(load_nlr_results, sd=2),
-               'ppinn': get_data(load_ppinn_results, sd=2)}
+def make_grid_plot(sd, drop=False, undersample=False):
+    results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False),
+               'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=undersample),
+               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample),
+               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample)}
     if drop:
         results = drop_edges(results)
         results = drop_unphysical(results)
 
     min_vals = {'cbf':0, 'mtt':0, 'cbv':0, 'delay':0, 'tmax':0}
-    max_vals = {'cbf':100, 'mtt':28, 'cbv':6, 'delay':3.5, 'tmax':15}
+    max_vals = {'cbf':100, 'mtt':28, 'cbv':6, 'delay':3.5, 'tmax':20}
     title = {'gt': 'GT', 'sygnovia':'Sygno.via', 'nlr':'NLR', 'ppinn':'PPINN'}
     param_title = {'cbf':'CBF', 'mtt':'MTT', 'cbv':'CBV', 'delay':'Delay', 'tmax':'Tmax'}
     param_unts = {'cbf':'[ml/100g/min]', 'mtt':'[s]', 'cbv':'[ml/100g]', 'delay':'[s]', 'tmax':'[s]'}
@@ -177,85 +180,201 @@ def make_grid_plot(sd, drop=False):
 
             fig.add_subplot(ax)
 
-    plt.savefig('phantom_results.png', dpi=150, bbox_inches='tight')
+    name = f'visuals/phantom_results_sd_{sd}_us_{str(undersample)}_drop_{str(drop)}.png'
+    plt.savefig(name, dpi=150, bbox_inches='tight')
     fig.show()
-def make_plots(sd, drop=False):
-    results = {'gt': get_data(load_phantom_gt, sd=None),
-               'sygnovia': get_data(load_sygnovia_results, sd=2),
-               'nlr': get_data(load_nlr_results, sd=2)}
+def make_ba_plots(sd, drop=False, undersample=False):
+    results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False),
+               'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=undersample),
+               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample),
+               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample)}
     if drop:
         results = drop_edges(results)
         results = drop_unphysical(results)
 
+    min_vals = {'cbf':0, 'mtt':0, 'cbv':0, 'delay':0, 'tmax':0}
+    max_vals = {'cbf':100, 'mtt':28, 'cbv':6, 'delay':3.5, 'tmax':20}
 
-    fig, ax = plt.subplots(1,3, figsize=(6,10))
-    ax[0].imshow(results['gt']['cbf'], cmap='jet', vmin=0, vmax=90)
-    ax[1].imshow(results['sygnovia']['cbf'], cmap='jet', vmin=0, vmax=90)
-    ax[2].imshow(results['nlr']['cbf'], cmap='jet', vmin=0, vmax=90)
-    make_axes(ax)
-    plt.subplots_adjust(left=0.3)
+    title = {'gt': 'GT', 'sygnovia':'Sygno.via', 'nlr':'NLR', 'ppinn':'PPINN'}
+    param_title = {'cbf':'CBF', 'mtt':'MTT', 'cbv':'CBV', 'delay':'Delay', 'tmax':'Tmax'}
+    param_unts = {'cbf':'[ml/100g/min]', 'mtt':'[s]', 'cbv':'[ml/100g]', 'delay':'[s]', 'tmax':'[s]'}
+
+    for key in param_title.keys():
+
+        fig, ax = plt.subplots(1,3)
+        scale =  1
+        bland_altman_plot(results['sygnovia'][key].flatten(), results['gt'][key].flatten(), ax[0], xlim=max_vals[key]*scale, ylim=max_vals[key]*scale, s=0.1)
+        bland_altman_plot(results['nlr'][key].flatten(), results['gt'][key].flatten(), ax[1], xlim=max_vals[key]*scale, ylim=max_vals[key]*scale, s=0.1)
+        bland_altman_plot(results['ppinn'][key].flatten(), results['gt'][key].flatten(), ax[2], xlim=max_vals[key]*scale, ylim=max_vals[key]*scale, s=0.1)
+        ax[0].set_title('Sygno.via')
+        ax[1].set_title('NLR')
+        ax[2].set_title('PPINN')
+        fig.suptitle(param_title[key] + f',sd: {sd}, unphysical dropped: {drop}', fontsize=16)
+        name = f'visuals/boxplots_param_{key}_sd_{sd}_us_{str(undersample)}_drop_{str(drop)}.png'
+        plt.savefig(name, dpi=150, bbox_inches='tight')
+        plt.tight_layout()
+        plt.show()
+
+    # for key in param_title.keys():
+    #     fig, ax = plt.subplots(1,3)
+    #     fig.suptitle(param_title[key], fontsize=16)
+    #     ax[0].scatter(results['gt'][key].flatten(), results['sygnovia'][key].flatten(), s=0.2)
+    #     ax[1].scatter(results['gt'][key].flatten(), results['nlr'][key].flatten(), s=0.2)
+    #     ax[2].scatter(results['gt'][key].flatten(), results['ppinn'][key].flatten(), s=0.2)
+    #     for x in ax:
+    #         x.set_ylim(0,max_vals[key]*1.2)
+    #         x.set_xlim(0,max_vals[key]*1.2)
+    #     plt.show()
+
+def make_amc_param_plots():
+    base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_ppinn_amcctp"
+    cases = os.listdir(base)
+    min_vals = {'cbf':0, 'mtt':0, 'cbv':0, 'delay':0, 'tmax':0}
+    max_vals = {'cbf':100, 'mtt':28, 'cbv':6, 'delay':3.5, 'tmax':20}
+    param_title = {'cbf':'CBF', 'mtt':'MTT', 'cbv':'CBV', 'delay':'Delay', 'tmax':'Tmax'}
+    for case in cases:
+        results = {'cbv':sitk.ReadImage(os.path.join(base, case, "cbv.nii")),
+                   'cbf':sitk.ReadImage(os.path.join(base, case, "cbf.nii")),
+                   'mtt':sitk.ReadImage(os.path.join(base, case, "mtt.nii")),
+                   'tmax':sitk.ReadImage(os.path.join(base, case, "tmax.nii")),
+                   'delay':sitk.ReadImage(os.path.join(base, case, "delay.nii")),
+                   'dwi_seg':sitk.ReadImage(os.path.join(base, case, "dwi_seg.nii")),
+                   'brainmask':sitk.ReadImage(os.path.join(base, case, "brainmask.nii.gz"))}
+        spacing = results['dwi_seg'].GetSpacing()
+        results = {key: sitk.GetArrayFromImage(val) for key, val in results.items()}
+        volume = np.round(np.sum(results['dwi_seg']) * np.product(spacing) / 1000, 1)
+        results['dwi_seg_inverse'] = np.zeros_like(results['dwi_seg'])
+        results['dwi_seg_inverse'][results['dwi_seg']!=1] = 1
+        results['healthy'] = results['dwi_seg_inverse'] * results['brainmask']
+
+        fig = plt.figure(figsize=(10, 5))
+        outer = gridspec.GridSpec(2, 3, wspace=0.55, hspace=0.55)
+        for i, key in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
+            kwargs = {'bins': 100, 'density': True, 'histtype': 'step', 'range': (min_vals[key], max_vals[key]*2)}
+            ax = plt.Subplot(fig, outer[i])
+            ax.set_title(f'{param_title[key]}', size=14, pad=20)
+            ax.hist(results[key][results['healthy'] == 1].flatten(), label='healthy', **kwargs)
+            ax.hist(results[key][results['dwi_seg'] == 1].flatten(), label=f'infarcted: {volume} ml', **kwargs)
+            if i == 4:
+                ax.legend(title=case, loc='center left', bbox_to_anchor=(1,0.5))
+
+            fig.add_subplot(ax)
+        name = f'visuals/hist_param_amc_{case}.png'
+        plt.savefig(name, dpi=150, bbox_inches='tight')
+        plt.show()
+def lines_box_plot_amc():
+    base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_ppinn_amcctp"
+    cases = os.listdir(base)
+    min_vals = {'cbf':0, 'mtt':0, 'cbv':0, 'delay':0, 'tmax':0}
+    max_vals = {'cbf':100, 'mtt':28, 'cbv':6, 'delay':3.5, 'tmax':20}
+    param_title = {'cbf':'CBF', 'mtt':'MTT', 'cbv':'CBV', 'delay':'Delay', 'tmax':'Tmax'}
+    param_unts = {'cbf':'[ml/100g/min]', 'mtt':'[s]', 'cbv':'[ml/100g]', 'delay':'[s]', 'tmax':'[s]'}
+
+    fig = plt.figure(figsize=(15, 3))
+    outer = gridspec.GridSpec(1, 5, wspace=0.55, hspace=0.55)
+    for i, key in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
+        infarcted = []
+        healthy = []
+        volumes = []
+        for case in cases:
+            results = {'cbv':sitk.ReadImage(os.path.join(base, case, "cbv.nii")),
+                       'cbf':sitk.ReadImage(os.path.join(base, case, "cbf.nii")),
+                       'mtt':sitk.ReadImage(os.path.join(base, case, "mtt.nii")),
+                       'tmax':sitk.ReadImage(os.path.join(base, case, "tmax.nii")),
+                       'delay':sitk.ReadImage(os.path.join(base, case, "delay.nii")),
+                       'dwi_seg':sitk.ReadImage(os.path.join(base, case, "dwi_seg.nii")),
+                       'brainmask':sitk.ReadImage(os.path.join(base, case, "brainmask.nii.gz"))}
+            spacing = results['dwi_seg'].GetSpacing()
+            results = {key: sitk.GetArrayFromImage(val) for key, val in results.items()}
+            volume = np.round(np.sum(results['dwi_seg']) * np.product(spacing) / 1000, 1)
+            volumes.append(volume)
+            results['dwi_seg_inverse'] = np.zeros_like(results['dwi_seg'])
+            results['dwi_seg_inverse'][results['dwi_seg']!=1] = 1
+            results['healthy'] = results['dwi_seg_inverse'] * results['brainmask']
+            healthy.append(np.median(results[key][results['healthy'] == 1].flatten()))
+            infarcted.append(np.median(results[key][results['dwi_seg'] == 1].flatten()))
+
+        ax = plt.Subplot(fig, outer[i])
+        ax.set_title(f'{param_title[key]}', size=14, pad=10)
+        ax.boxplot([healthy, infarcted], widths=(0.3,0.3), medianprops=dict(linestyle='-', linewidth=2., color='k'))
+        ax.scatter(15*[1], healthy, alpha=0.5, c='green')
+        ax.scatter(15*[2], infarcted, alpha=0.5, c='firebrick')
+        ax.set_ylabel(param_unts[key], fontdict=font)
+
+        for i, j in zip(healthy, infarcted):
+            if key in ['mtt', 'delay', 'tmax']:
+                if j < i*0.98:
+                    ax.plot([1,2],[i,j],c='firebrick', alpha=0.5)
+                elif j > i*1.02:
+                    ax.plot([1,2],[i,j],c='green', alpha=0.5)
+                else:
+                    ax.plot([1,2],[i,j],c='k', alpha=0.5)
+            if key in ['cbf', 'cbv']:
+                if j < i*0.98:
+                    ax.plot([1,2],[i,j],c='green', alpha=0.5)
+                elif j > i*1.02:
+                    ax.plot([1,2],[i,j],c='firebrick', alpha=0.5)
+                else:
+                    ax.plot([1,2],[i,j],c='k', alpha=0.5)
+        labels = ['Healthy', 'Infarcted']
+        ax.set_xticklabels(labels, fontdict=font)
+        fig.add_subplot(ax)
+    plt.savefig('visuals/lines_boxplot.png', dpi=150, bbox_inches='tight')
+
     plt.show()
 
-    fig, ax = plt.subplots(1,3, figsize=(6,10))
-    ax[0].imshow(results['gt']['cbv'], cmap='jet', vmin=0, vmax=7)
-    ax[1].imshow(results['sygnovia']['cbv'], cmap='jet', vmin=0, vmax=7)
-    ax[2].imshow(results['nlr']['cbv'], cmap='jet', vmin=0, vmax=7)
-    make_axes(ax)
-    plt.subplots_adjust(left=0.3)
 
-    plt.show()
-    fig, ax = plt.subplots(1,3, figsize=(6,10))
-    ax[0].imshow(results['gt']['mtt'], cmap='jet', vmin=0, vmax=25)
-    ax[1].imshow(results['sygnovia']['mtt'], cmap='jet', vmin=0, vmax=25)
-    ax[2].imshow(results['nlr']['mtt'], cmap='jet', vmin=0, vmax=25)
-    make_axes(ax)
-    plt.subplots_adjust(left=0.3)
+def plot_sv_vs_ppinn():
+    base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_ppinn_amcctp"
+    cases = os.listdir(base)
 
-    plt.show()
-    fig, ax = plt.subplots(1,3, figsize=(6,10))
-    ax[0].imshow(results['gt']['tmax'], cmap='jet', vmin=0, vmax=15)
-    ax[1].imshow(results['sygnovia']['tmax'], cmap='jet', vmin=0, vmax=15)
-    ax[2].imshow(results['nlr']['tmax'], cmap='jet', vmin=0, vmax=15)
-    make_axes(ax)
-    plt.subplots_adjust(left=0.3)
+    min_vals = {'cbf':0, 'mtt':0, 'cbv':0, 'delay':0, 'tmax':0}
+    max_vals = {'cbf':100, 'mtt':28, 'cbv':6, 'delay':3.5, 'tmax':20}
+    param_title = {'cbf':'CBF', 'mtt':'MTT', 'cbv':'CBV', 'delay':'Delay', 'tmax':'Tmax'}
+    param_unts = {'cbf':'[ml/100g/min]', 'mtt':'[s]', 'cbv':'[ml/100g]', 'delay':'[s]', 'tmax':'[s]'}
+    for case in cases:
+        results = {'cbv':sitk.ReadImage(os.path.join(base, case, "cbv.nii")),
+                   'cbf':sitk.ReadImage(os.path.join(base, case, "cbf.nii")),
+                   'mtt':sitk.ReadImage(os.path.join(base, case, "mtt.nii")),
+                   'tmax':sitk.ReadImage(os.path.join(base, case, "tmax.nii")),
+                   'delay':sitk.ReadImage(os.path.join(base, case, "delay.nii")),
+                   'dwi_seg':sitk.ReadImage(os.path.join(base, case, "dwi_seg.nii")),
+                   'brainmask':sitk.ReadImage(os.path.join(base, case, "brainmask.nii.gz"))}
+        results = {key: sitk.GetArrayFromImage(val) for key, val in results.items()}
 
-    plt.show()
-    ffig, ax = plt.subplots(1,3, figsize=(6,10))
-    ax[0].imshow(results['gt']['delay'], cmap='jet', vmin=0, vmax=3.5)
-    ax[1].imshow(results['sygnovia']['delay'], cmap='jet', vmin=0, vmax=3.5)
-    ax[2].imshow(results['nlr']['delay'], cmap='jet', vmin=0, vmax=3.5)
-    make_axes(ax)
-    plt.subplots_adjust(left=0.3)
+        results_sv = load_sygnovia_results_amc(case)
+        for k in range(results_sv['core'].shape[0]):
+            fig = plt.figure(figsize=(4, 8))
 
-    plt.show()
-
-
-    fig, ax = plt.subplots(1,3)
-    bland_altman_plot(results['sygnovia']['cbv'].flatten(), results['nlr']['cbv'].flatten(), ax[0], xlim=10, ylim=10, s=0.2)
-    bland_altman_plot(results['sygnovia']['cbv'].flatten(), results['gt']['cbv'].flatten(), ax[1], xlim=10, ylim=10, s=0.2)
-    bland_altman_plot(results['nlr']['cbv'].flatten(), results['gt']['cbv'].flatten(), ax[2], xlim=10, ylim=10, s=0.2)
-    plt.show()
-
-    fig, ax = plt.subplots(1,3)
-    ax[1].scatter(results['gt']['cbf'].flatten(), results['sygnovia']['cbf'].flatten(), s=0.2)
-    ax[2].scatter(results['gt']['cbf'].flatten(), results['nlr']['cbf'].flatten(), s=0.2)
-
-    ax[1].set_ylim(0,150)
-    ax[2].set_ylim(0,150)
-    ax[1].set_xlim(0,100)
-    ax[2].set_xlim(0,100)
-    plt.show()
-
+            outer = gridspec.GridSpec(5, 1, wspace=0.55, hspace=0.55)
+            for i, key in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
+                inner = gridspec.GridSpecFromSubplotSpec(1, 2,
+                                                         subplot_spec=outer[i],
+                                                         wspace=0.1,
+                                                         hspace=0.1)
+                ax = plt.Subplot(fig, inner[0])
+                ax.imshow(results[key][k], cmap='jet', vmin=min_vals[key], vmax=max_vals[key])
+                ax.set_title('PPINN'+param_title[key], fontdict=font)
+                fig.add_subplot(ax)
+                ax = plt.Subplot(fig, inner[1])
+                ax.imshow(results_sv[key][k], cmap='jet', vmin=min_vals[key], vmax=max_vals[key])
+                ax.set_title('SV'+param_title[key], fontdict=font)
+                fig.add_subplot(ax)
+        if np.sum(results['dwi_seg'])>0:
+            plt.show()
+        else:
+            plt.close()
+#
 def make_phantom_plot():
     data = load_phantom()
     xs = [15, 200, 150]
     ys = [222, 20, 90]
-    col = ['k', 'slategrey', 'orange']
+    col = ['k', 'slategrey', 'silver']
 
-    fig = plt.figure()
+    fig = plt.figure(figsize=(6.5,5.5))
     ax = [fig.add_subplot(1, 2, 1), fig.add_subplot(1, 2, 2)]
-    ax[0].plot(data['time'], data['aif'], label=r'$C_{AIF}(t)$', c='royalblue', lw=2)
-    ax[0].plot(data['time'], data['vof'], label=r'$C_{VOF}(t)$', c='firebrick', lw=2)
+    ax[0].plot(data['time'], data['aif'], label=r'$C_{AIF}(t)$', c='firebrick', lw=2)
+    ax[0].plot(data['time'], data['vof'], label=r'$C_{VOF}(t)$', c='royalblue', lw=2)
 
     for ix, (i, j )in enumerate(zip(xs, ys)):
         cbv = np.round(data['perfusion_values']['cbv'][i,j],1)
@@ -268,8 +387,8 @@ def make_phantom_plot():
     ax[0].set_ylim(20,300)
 
     # ax[1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    ax[0].legend(frameon=False)
-    ax[1].legend(frameon=False)
+    ax[0].legend(frameon=False, prop={'size': 12})
+    ax[1].legend(frameon=False, title=r'$C_{TAC}(t)$', prop={'size': 10})
 
     ax[1].set_xlabel(r'[s]', fontdict=font)
     ax[0].set_xlabel(r'[s]', fontdict=font)
@@ -277,7 +396,7 @@ def make_phantom_plot():
     # ax[1].set_ylabel(r'[HU]', fontdict=font)
     for x_ in ax:
         x_.tick_params(axis='both', which='major', labelsize=12)
-    plt.savefig('phantom_cruves.png', dpi=150, bbox_inches='tight')
+    plt.savefig('visuals/phantom_cruves.png', dpi=150, bbox_inches='tight')
 
     plt.show()
 
@@ -285,6 +404,22 @@ def make_phantom_plot():
 
 
 if __name__ == '__main__':
-    make_phantom_plot()
-    make_grid_plot(sd=2)
-    make_grid_plot(sd=2, drop=True)
+    # make_ba_plots(sd=2, drop=True)
+    # make_ba_plots(sd=2, drop=False)
+    # make_plots(sd=4, drop=True)
+    # make_grid_plot(sd=1, drop=True, undersample=False)
+    # make_grid_plot(sd=2, drop=True, undersample=False)
+    # make_grid_plot(sd=3, drop=True, undersample=False)
+    # make_grid_plot(sd=4, drop=True, undersample=False)
+    # make_grid_plot(sd=5, drop=True, undersample=False)
+    # make_grid_plot(sd=2, drop=True, undersample=True)
+    # make_grid_plot(sd=2, drop=False, undersample=False)
+    # make_grid_plot(sd=3, drop=False, undersample=False)
+    # make_grid_plot(sd=4, drop=False, undersample=False)
+    # make_grid_plot(sd=5, drop=False, undersample=False)
+    # make_grid_plot(sd=2, drop=False, undersample=True)
+    # make_amc_param_plots()
+    # lines_box_plot_amc()
+    plot_sv_vs_ppinn()
+
+
