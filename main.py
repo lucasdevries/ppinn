@@ -59,6 +59,7 @@ def main():
         }
     else:
         raise NotImplementedError("What are you trying to do?")
+    print('Goodbye world!')
 
 
 def train(config):
@@ -78,17 +79,12 @@ def train(config):
     # ppinn.plot_params(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
     # ppinn.plot_params_difference(0,0, perfusion_values=data_dict['perfusion_values'], epoch=0)
 
-    ppinn.fit(data_dict['time'],
-              data_dict['aif'],
-              data_dict['curves'],
-              data_dict['coll_points'],
-              data_dict['bound'],
+    ppinn.fit(data_dict,
               data_dict['perfusion_values'],
               batch_size=config.batch_size,
               epochs=config.epochs)
     ppinn.save_parameters()
     ppinn_results = ppinn.get_results()
-
     return ppinn_results
 
 
@@ -108,9 +104,19 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(slices)):
+        for slice in tqdm(range(slices)[6:]):
             brainmask_data = data_dict['brainmask'][slice]
-            valid_voxels = torch.where(brainmask_data == 1)
+            vessel_data = data_dict['vesselmask'][slice]
+            valid_voxels = torch.where((brainmask_data == 1) & (vessel_data == 0))
+            # new = np.zeros_like(vessel_data)
+            # new[valid_voxels] = 1
+            # fig, ax = plt.subplots(1,3)
+            # ax[0].imshow(brainmask_data)
+            # ax[1].imshow(vessel_data)
+            # ax[2].imshow(new)
+            # plt.show()
+            # continue
+            # valid_voxels = torch.where((brainmask_data == 1) & (vessel_data == 0))
             shape_in = torch.Size([1, len(valid_voxels[0]), 1])
             if len(valid_voxels[0]) == 0:
                 cbf_results[slice, ...] = np.zeros([512, 512])
@@ -129,7 +135,8 @@ def train_amc(config):
             result_dict = ppinn.fit(slice,
                                     data_dict,
                                     batch_size=config.batch_size,
-                                    epochs=int(config.epochs))
+                                    epochs=int(config.epochs),
+                                    case=case)
 
             result_dict = drop_unphysical_amc(result_dict)
             cbf_results[slice, ...] = result_dict['cbf']
@@ -137,8 +144,8 @@ def train_amc(config):
             mtt_results[slice, ...] = result_dict['mtt']
             delay_results[slice, ...] = result_dict['delay']
             tmax_results[slice, ...] = result_dict['tmax']
-            # visualize_amc(case, slice, result_dict, data_dict)
-            visualize_amc_sygno(case, slice, sygnovia_results, data_dict)
+            visualize_amc(case, slice, result_dict, data_dict)
+            # visualize_amc_sygno(case, slice, sygnovia_results, data_dict)
 
         # save maps as sitks
         data_utils.save_perfusion_parameters_amc(config,
@@ -148,7 +155,7 @@ def train_amc(config):
                                                  mtt_results,
                                                  delay_results,
                                                  tmax_results
-                                                 )
+                                                )
 
 def train_isles(config):
     folder = 'TRAINING' if config.mode == 'train' else 'TESTING'

@@ -930,3 +930,93 @@ def color_axes(ax):
     ax[2,4].spines['left'].set_color('red')
     ax[2,4].spines['right'].set_color('red')
     return ax
+
+def plot_curves_at_epoch(data_dict, data_curves, device, forward_NNs, ep, case, slice, plot_estimates):
+    time_hr = data_dict['time_inference_highres']
+    data_time_inf = time_hr.to(device)
+    aif_inf, tac_inf = forward_NNs(data_time_inf, data_time_inf)
+    font = {'family': 'serif',
+            'color': 'black',
+            'weight': 'normal',
+            'size': 24,
+            }
+    # for i in range(6, 6 * 200 + 50, 50):
+    #     if np.min(data_curves[0, 3000 + i, 0].cpu().detach().numpy()) < 0:
+    #         continue
+    #     plt.figure(figsize=(5, 5))
+    #     time = data_dict['time'][slice] * data_dict['std_t'] + data_dict['mean_t']
+    #     time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
+    #     if plot_estimates:
+    #         plt.plot(time_hr, tac_inf[0,3000+i,0].cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
+    #     plt.scatter(time, data_curves[0, 3000 + i, 0].cpu().detach().numpy(), c='k', label=r'obs. data')
+    #     plt.xticks([])
+    #     plt.yticks([])
+    #     plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+    #     plt.ylabel('[HU]', fontdict=font)
+    #     plt.xlabel('[s]', fontdict=font)
+    #     if plot_estimates:
+    #         plt.savefig(os.path.join(wandb.run.dir, f'tac_case_{case}_{i}_sl{slice}_ep{ep}_est.png'), dpi=150, bbox_inches='tight')
+    #     else:
+    #         plt.savefig(os.path.join(wandb.run.dir, f'tac_case_{case}_{i}_sl{slice}_ep{ep}_data.png'), dpi=150, bbox_inches='tight')
+    #     plt.close()  #
+    plt.figure(figsize=(5, 5))
+    time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
+    time_aif = data_dict['aif_time'] * data_dict['std_t'] + data_dict['mean_t']
+    if plot_estimates:
+        plt.plot(time_hr, aif_inf.cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
+    plt.scatter(time_aif, data_dict['aif'], c='k', label=r'obs. data')
+    plt.xticks([])
+    plt.yticks([])
+    plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.ylabel('[HU]', fontdict=font)
+    plt.xlabel('[s]', fontdict=font)
+    if plot_estimates:
+        plt.savefig(os.path.join(wandb.run.dir, f'aif_case_{case}_sl{slice}_ep_{ep}_est.png'), dpi=150, bbox_inches='tight')
+    else:
+        plt.savefig(os.path.join(wandb.run.dir, f'aif_case_{case}_sl{slice}_ep_{ep}_data.png'), dpi=150, bbox_inches='tight')
+    plt.close()
+
+def plot_curves_at_epoch_phantom(data_dict, data_curves, device, forward_NNs, ep, plot_estimates):
+    time_hr = data_dict['time_inference_highres']
+    data_time_inf = time_hr.to(device)
+    aif_inf, tac_inf = forward_NNs(data_time_inf)
+    font = {'family': 'serif',
+            'color': 'black',
+            'weight': 'normal',
+            'size': 24,
+            }
+    for i in range(0, 224, 1):
+        if np.min(data_curves[0,0, 128,i].cpu().detach().numpy()) < 0:
+            continue
+        plt.figure(figsize=(5, 5))
+        time = data_dict['time'] * data_dict['std_t'] + data_dict['mean_t']
+        time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
+        if plot_estimates:
+            plt.plot(time_hr, tac_inf[0,0, 128,i].cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
+        plt.scatter(time, data_curves[0,0, 128,i].cpu().detach().numpy(), c='k', label=r'obs. data')
+        plt.xticks([])
+        plt.yticks([])
+        plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+        plt.ylabel('[HU]', fontdict=font)
+        plt.xlabel('[s]', fontdict=font)
+        if plot_estimates:
+            plt.savefig(os.path.join(wandb.run.dir, f'tac_{i}_ep{ep}_est.png'), dpi=150, bbox_inches='tight')
+        else:
+            plt.savefig(os.path.join(wandb.run.dir, f'tac_{i}_ep{ep}_data.png'), dpi=150, bbox_inches='tight')
+        plt.close()  #
+    plt.figure(figsize=(5, 5))
+    time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
+    time_aif = data_dict['time'] * data_dict['std_t'] + data_dict['mean_t']
+    if plot_estimates:
+        plt.plot(time_hr, aif_inf.cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
+    plt.scatter(time_aif, data_dict['aif'], c='k', label=r'obs. data')
+    plt.xticks([])
+    plt.yticks([])
+    plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.ylabel('[HU]', fontdict=font)
+    plt.xlabel('[s]', fontdict=font)
+    if plot_estimates:
+        plt.savefig(os.path.join(wandb.run.dir, f'aif_ep_{ep}_est.png'), dpi=150, bbox_inches='tight')
+    else:
+        plt.savefig(os.path.join(wandb.run.dir, f'aif_ep_{ep}_data.png'), dpi=150, bbox_inches='tight')
+    plt.close()

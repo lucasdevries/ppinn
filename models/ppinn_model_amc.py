@@ -12,8 +12,12 @@ import logging
 import os
 import wandb
 import SimpleITK as sitk
-from utils.val_utils import load_nlr_results
+from utils.val_utils import load_nlr_results, plot_curves_at_epoch
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["axes.linewidth"] = 1.5
+plt.rcParams["mathtext.fontset"] = 'cm'
+
 class PPINN_amc(nn.Module):
     def __init__(self,
                  config,
@@ -60,10 +64,11 @@ class PPINN_amc(nn.Module):
         self.set_cbf_parameter()
         self.set_mtt_parameter()
         self.constraint = weightConstraint()
+        self.min_aif_loss = 100
         n_layers = config.n_layers
         n_units = config.n_units
         lr = config.lr
-        loss_weights = (config.lw_data, config.lw_res, 0)
+        loss_weights = (config.lw_data, config.lw_res, config.lw_curves)
         bn = config.bn
 
         self.NN_tissue = MLP(
@@ -138,10 +143,10 @@ class PPINN_amc(nn.Module):
 
     def set_loss_weights(self, loss_weights):
         loss_weights = torch.tensor(loss_weights)
-        self.lw_data, self.lw_res, self.lw_bc = loss_weights
+        self.lw_data, self.lw_res, self.lw_curves = loss_weights
         self.lw_data.to(self.device)
         self.lw_res.to(self.device)
-        self.lw_bc.to(self.device)
+        self.lw_curves.to(self.device)
 
     def set_lr(self, lr):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
@@ -216,7 +221,8 @@ class PPINN_amc(nn.Module):
             slice,
             data_dict,
             batch_size,
-            epochs):
+            epochs,
+            case):
         # Here we should use the corrext timing
         data_time = data_dict['time'].to(self.device)[slice]
         data_aif_time = data_dict['aif_time'].to(self.device)
@@ -224,7 +230,6 @@ class PPINN_amc(nn.Module):
         data_curves = data_dict['curves'][slice:slice+1]
         data_curves = data_curves[0][self.original_data_indices].unsqueeze(1).unsqueeze(0)
         data_curves = data_curves.to(self.device)
-
 
         data_collopoints = data_dict['coll_points'].to(self.device)
         data_boundary = data_dict['bound'].to(self.device)
@@ -240,6 +245,7 @@ class PPINN_amc(nn.Module):
                 batch_aif = data_aif
                 batch_curves = data_curves
                 batch_boundary = data_boundary
+
                 loss_aif, loss_tissue, loss_residual = self.optimize(batch_time,
                                                          batch_aif,
                                                          batch_curves,
@@ -251,59 +257,20 @@ class PPINN_amc(nn.Module):
                 epoch_tissue_loss.update(loss_tissue.item(), len(batch_time))
                 epoch_residual_loss.update(loss_residual.item(), len(batch_collopoints))
 
-            self.scheduler.step()
+                self.min_aif_loss = loss_aif.item()
 
+            self.scheduler.step()
             metrics = {f"aif_loss_{slice}": epoch_aif_loss.avg,
                        f"tissue_loss_{slice}": epoch_tissue_loss.avg,
                        f"residual_loss_{slice}": epoch_residual_loss.avg,
                        f"lr_{slice}": self.optimizer.param_groups[0]['lr'],
                        }
-            # if ep in [9]:
-            #     data_time_inf = data_dict['time_inference_highres'].to(self.device)
-            #     aif_inf, tac_inf = self.forward_NNs(data_time_inf, data_time_inf)
-            #     # colors = ['k', 'r', 'b', 'g']
-            #     # plt.imshow(data_dict['curves'][slice+5,...,0].cpu().detach().numpy())
-            #     # plt.show()
-            #     # for i in range(256):
-            #     #     # plt.scatter(data_dict['time_inference_highres'], tac_inf[0,256+i,256].cpu().detach().numpy(), c='k')
-            #     #     plt.scatter(data_dict['time'][slice], data_dict['curves'][slice+5,128+i,256].cpu().detach().numpy(), c='k')
-            #     # # wandb.log({"curves": plt})
-            #     # plt.show()
-            #
-            #     colors = ['k']
-            #     for i in range(1):
-            #         plt.scatter(data_dict['time_inference_highres'], aif_inf.cpu().detach().numpy(), c=colors[i])
-            #     plt.scatter(data_dict['aif_time'], data_dict['aif'], c='r')
-            #     # wandb.log({"aif": plt})
-            #     plt.show()
-            #
-            #     cbf = torch.zeros(self.original_data_shape).to(self.device)
-            #     mtt = torch.zeros(self.original_data_shape).to(self.device)
-            #     mtt_min = torch.zeros(self.original_data_shape).to(self.device)
-            #     delay = torch.zeros(self.original_data_shape).to(self.device)
-            #
-            #     cbf[self.original_data_indices] = self.get_cbf(seconds=False).squeeze()
-            #     mtt[self.original_data_indices] = self.get_mtt(seconds=True).squeeze()
-            #     mtt_min[self.original_data_indices] = self.get_mtt(seconds=False).squeeze()
-            #     delay[self.original_data_indices] = self.get_delay(seconds=True).squeeze()
-            #
-            #     cbv = cbf * mtt_min
-            #     tmax = delay + 0.5 * mtt
-
-                # np.save(f'aif_estimates_{ep}.npy', aif_inf.cpu().detach().numpy())
-                # np.save(f'tacs_estimates_{ep}.npy', tac_inf.cpu().detach().numpy())
-                # np.save('tacs.npy', data_dict['curves'][slice].cpu().detach().numpy())
-                # np.save('aif.npy', data_dict['aif'].cpu().detach().numpy())
-                #
-                # sitk.WriteImage(sitk.GetImageFromArray(tac_inf[0].cpu().detach().numpy()),f'estimates_{ep}.nii')
-                # sitk.WriteImage(sitk.GetImageFromArray(data_dict['curves'][slice].cpu().detach().numpy()),f'curves{ep}.nii')
-
-
-
             wandb.log(metrics, step=self.current_iteration)
 
-            # if ep % self.config.plot_params_every == 0:
-            #     self.plot_params(slice, ep, brainmask)
+            if ep%25==0:
+                plot_curves_at_epoch(data_dict, data_curves, self.device, self.forward_NNs, ep, case,slice, plot_estimates=True)
+                # plot_curves_at_epoch(data_dict, data_curves, self.device, self.forward_NNs, ep, case,slice, plot_estimates=False)
+
             self.current_iteration += 1
 
         # get results
@@ -353,7 +320,7 @@ class PPINN_amc(nn.Module):
             # compute data loss
             c_aif, c_tissue = self.forward_NNs(batch_time, batch_aif_time)
             loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
-            loss += self.lw_data * (loss_aif + loss_tissue)
+            loss += self.lw_data * (loss_aif + self.lw_curves*loss_tissue)
         if self.lw_res:
             # compute residual loss
             c_aif, c_tissue, residual = self.forward_complete(batch_collopoints)
@@ -365,6 +332,11 @@ class PPINN_amc(nn.Module):
         if np.isnan(float(loss.item())):
             print(loss_aif, loss_tissue, loss_residual)
             raise ValueError('Loss is nan during training...')
+
+        if loss_aif < 0.0015:
+            # if self.min_aif_loss < 0.0015:
+            for param in self.NN_aif.parameters():
+                param.requires_grad = False
 
         loss.backward()
         self.optimizer.step()

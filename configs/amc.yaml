@@ -1,9 +1,6 @@
 program: main.py
 method: grid
 parameters:
-  lw_res:
-    values:
-      - 250
   data:
     values:
       - 'AMCCTP'
@@ -12,9 +9,15 @@ parameters:
       - 25
   sd:
     values:
-      - 2
+      - 4
+  lr:
+    values:
+      - 1e-2
+  lw_res:
+    values:
+      - 250
 command:
   - ${env}
   - python
   - ${program}
-  - configs\config.json
+  - configs\amc.json

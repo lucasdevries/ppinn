@@ -3,7 +3,7 @@
   "gpu_device": 0,
   "seed": 11,
   "wandb_folder": "./wandb/",
-  "wandb" :false,
+  "wandb" :true,
   "mode": "train",
   "cbv_ml": 5,
   "simulation_method": 2,
@@ -11,11 +11,12 @@
   "n_units": 16,
   "lr": 1e-2,
   "lw_data" : 1,
-  "lw_res" : 25,
+  "lw_res" : 250,
+  "lw_curves": 1,
   "bn" : false,
   "batch_size": 16,
   "optimizer": "Adam",
-  "epochs": 1000,
+  "epochs": 25,
   "filter_type": "gauss_spatial",
   "sd": 2,
   "plot_params_every": 2000,
@@ -27,7 +28,7 @@
   "baseline_zero": false,
   "drop_edges": true,
   "drop_unphysical": true,
-  "data": "phantom",
+  "data": "AMCCTP",
   "undersampling": 0.0
 }
 

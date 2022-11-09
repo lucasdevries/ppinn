@@ -121,12 +121,9 @@ def load_data(gaussian_filter_type, sd=2.5,
     perfusion_values_dict['tmax'] = perfusion_values_dict['delay'] + 0.5 * perfusion_values_dict['mtt']
     perfusion_data = rearrange(perfusion_data, '(n cbv) t h w -> n cbv h w t', n=3)
 
-    time_inference_highres = np.array([float(x) for x in np.arange(0, 60, 0.1)])
-
     data_dict = {'aif': aif_data,
                  'vof': vof_data,
                  'time': time,
-                 'time_inference_highres': time_inference_highres,
                  'curves': perfusion_data[simulation_method:simulation_method + 1, cbv_ml-1:cbv_ml, :, :, :],
                  'perfusion_values': perfusion_values[simulation_method:simulation_method + 1, cbv_ml-1:cbv_ml,
                                      :, :, :]}
@@ -277,35 +274,41 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     aif_time_data = time_data[time_aif_location]
     vof_time_data = time_data[time_vof_location]
 
-
     # scale aif
     vof_baseline = np.mean(vof_data[:4])
     aif_baseline = np.mean(aif_data[:4])
     aif_wo_baseline = aif_data - aif_baseline
+    aif_part_nonzero_baseline = aif_wo_baseline.clip(max=0)
+    aif_wo_baseline = aif_wo_baseline.clip(min=0)
     vof_wo_baseline = vof_data - vof_baseline
     # now we use simpsons approximation because of irregular timing
     cumsum_aif = simpson(aif_wo_baseline, aif_time_data)
     cumsum_vof = simpson(vof_wo_baseline, vof_time_data)
+    # cumsum_aif = np.cumsum(aif_wo_baseline)[-1]
+    # cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
     ratio = cumsum_vof / cumsum_aif
     aif_data = aif_wo_baseline * ratio + aif_baseline
-
-
+    aif_data += aif_part_nonzero_baseline * ratio
     image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
     # If smoothing, apply here
     if gaussian_filter_type:
         image_data_dict['array'] = apply_gaussian_filter(gaussian_filter_type, image_data_dict['array'].copy(), sd=sd)
     image_data_dict['array'] = image_data_dict['array'].astype(np.float32)
     image_data_dict['array'] = rearrange(image_data_dict['array'], 't d h w -> d h w t')
-    # get high res time sample for plotting purposes
-    time_inference_highres = np.array([float(x) for x in np.arange(np.min(time_data), np.max(time_data), 0.1)])
+    image_data_dict['mip'] = np.max(image_data_dict['array'], axis=3)
+    if gaussian_filter_type:
+        image_data_dict['mip'] = apply_gaussian_filter(gaussian_filter_type, image_data_dict['mip'].copy(), sd=sd)
+    vesselmask = np.zeros_like(image_data_dict['mip'])
+    vesselmask[image_data_dict['mip']>150] = 1
+    image_data_dict['vesselmask'] = vesselmask
 
     data_dict = {'aif': aif_data,
                  'vof': vof_data,
                  'time': time_data,
-                 'time_inference_highres': time_inference_highres,
                  'curves': image_data_dict['array'],
                  'brainmask': brainmask_data,
-
+                 'mip': image_data_dict['mip'],
+                 'vesselmask':image_data_dict['vesselmask']
                  }
 
     data_dict = normalize_data(data_dict)
@@ -331,8 +334,7 @@ def normalize_data(data_dict):
     data_dict['std_t'] = data_dict['time'].std()
     data_dict['mean_t'] = data_dict['time'].mean()
     data_dict['time'] = (data_dict['time'] - data_dict['time'].mean()) / data_dict['time'].std()
-    data_dict['time_inference_highres'] = (data_dict['time_inference_highres'] - data_dict['time_inference_highres'].mean()) / data_dict['time_inference_highres'].std()
-
+    data_dict['time_inference_highres'] = np.array([float(x) for x in np.arange(np.min(data_dict['time']), np.max(data_dict['time']) + 0.01, 0.01)])
     # output normalization
     max_ = data_dict['aif'].max()
     data_dict['aif'] /= max_
@@ -444,8 +446,16 @@ def save_perfusion_parameters_amc(config, case, cbf_results, cbv_results, mtt_re
     dwi_segmentation = os.path.join(r'D:/PPINN_patient_data/AMCCTP', rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
     template = sitk.ReadImage(dwi_segmentation)
     sitk.WriteImage(template, os.path.join(wandb.run.dir, 'results', case, 'dwi_seg.nii'))
+
     brainmask = sitk.ReadImage(os.path.join(r'D:/PPINN_patient_data/AMCCTP', rf'CTP_nii_brainmask/{case}/brainmask.nii.gz'))
     sitk.WriteImage(brainmask, os.path.join(wandb.run.dir, 'results', case, 'brainmask.nii'))
+
+    t0 = sitk.ReadImage(os.path.join(r'D:/PPINN_patient_data/AMCCTP', rf'CTP_nii_brainmask/{case}/00_noskull.nii.gz'))
+    array = sitk.GetArrayFromImage(t0)
+    vessels = np.zeros_like(array)
+    vessels[array<50] = 1
+    vesselmask = np2itk(vessels, t0)
+    sitk.WriteImage(vesselmask, os.path.join(wandb.run.dir, 'results', case, 'vesselmask.nii'))
 
     cbf_results = np2itk(cbf_results, template)
     sitk.WriteImage(cbf_results, os.path.join(wandb.run.dir, 'results', case, 'cbf.nii'))

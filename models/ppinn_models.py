@@ -11,7 +11,7 @@ import logging
 import os
 import wandb
 import pickle
-from utils.val_utils import load_nlr_results
+from utils.val_utils import load_nlr_results, plot_curves_at_epoch_phantom
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 
@@ -228,20 +228,15 @@ class PPINN(nn.Module):
             return constant * flow * 60
 
     def fit(self,
-            data_time,
-            data_aif,
-            data_curves,
-            data_collopoints,
-            data_boundary,
+            data_dict,
             gt,
             batch_size,
             epochs):
-
-        data_time = data_time.to(self.device)
-        data_aif = data_aif.to(self.device)
-        data_curves = data_curves.to(self.device)
-        data_collopoints = data_collopoints.to(self.device)
-        data_boundary = data_boundary.to(self.device)
+        data_time = data_dict['time'].to(self.device)
+        data_aif = data_dict['aif'].to(self.device)
+        data_curves = data_dict['curves'].to(self.device)
+        data_collopoints = data_dict['coll_points'].to(self.device)
+        data_boundary = data_dict['bound'].to(self.device)
         collopoints_dataloader = DataLoader(data_collopoints, batch_size=batch_size, shuffle=True, drop_last=True)
 
         for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
@@ -281,6 +276,11 @@ class PPINN(nn.Module):
                     self.plot_params_difference(0, 0, gt, ep)
                 except:
                     continue
+
+            if ep%1000==0:
+                plot_curves_at_epoch_phantom(data_dict, data_curves, self.device, self.forward_NNs, ep, plot_estimates=True)
+                plot_curves_at_epoch_phantom(data_dict, data_curves, self.device, self.forward_NNs, ep, plot_estimates=False)
+                print('up to here')
             self.current_iteration += 1
 
     def optimize(self,
@@ -293,11 +293,6 @@ class PPINN(nn.Module):
         self.train()
         self.optimizer.zero_grad()
 
-        # batch_time = batch_time.to(self.device)
-        # batch_aif = batch_aif.to(self.device)
-        # batch_curves = batch_curves.to(self.device)
-        # batch_boundary = batch_boundary.to(self.device)
-        # batch_collopoints = batch_collopoints.to(self.device)
         batch_time.requires_grad = True
         batch_collopoints.requires_grad = True
         batch_boundary.requires_grad = True

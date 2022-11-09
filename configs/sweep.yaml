@@ -3,17 +3,9 @@ method: grid
 parameters:
   sd:
     values:
-      - 5
-      - 1
       - 2
-      - 3
-      - 4
   cbv_ml:
     values:
-      - 1
-      - 2
-      - 3
-      - 4
       - 5
   undersampling:
     values:
@@ -26,6 +18,8 @@ parameters:
       - 1e-2
   lw_res:
     values:
+      - 1
+      - 10
       - 25
 command:
   - ${env}
