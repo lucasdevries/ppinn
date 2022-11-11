@@ -3,8 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import wandb
 import os
-from einops.einops import repeat
+from einops.einops import repeat, rearrange
 import pandas as pd
+import torch
 def load_nlr_results(cbv_ml=5, sd=2, undersample=False):
     if not undersample:
 
@@ -1010,6 +1011,51 @@ def plot_curves_at_epoch_phantom(data_dict, data_curves, device, forward_NNs, ep
     if plot_estimates:
         plt.plot(time_hr, aif_inf.cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
     plt.scatter(time_aif, data_dict['aif'], c='k', label=r'obs. data')
+    plt.xticks([])
+    plt.yticks([])
+    plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.ylabel('[HU]', fontdict=font)
+    plt.xlabel('[s]', fontdict=font)
+    if plot_estimates:
+        plt.savefig(os.path.join(wandb.run.dir, f'aif_ep_{ep}_est.png'), dpi=150, bbox_inches='tight')
+    else:
+        plt.savefig(os.path.join(wandb.run.dir, f'aif_ep_{ep}_data.png'), dpi=150, bbox_inches='tight')
+    plt.close()
+
+def plot_curves_at_epoch_phantom_st(data_dict, batch_time, data_curves, device, forward_NNs, ep, plot_estimates):
+    nn_tissue_input = data_dict['coordinates'].to(device)
+    with torch.no_grad():
+        aif_inf, tac_inf = forward_NNs(batch_time, nn_tissue_input)
+
+    font = {'family': 'serif',
+            'color': 'black',
+            'weight': 'normal',
+            'size': 24,
+            }
+    for i in range(0, 10, 1):
+        if np.min(data_curves[:,0,0, 128,i].cpu().detach().numpy()) < 0:
+            continue
+        plt.figure(figsize=(5, 5))
+        # time = data_dict['time'] * data_dict['std_t'] + data_dict['mean_t']
+        # time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
+        # time_hr = time_hr[::10]
+        if plot_estimates:
+            plt.plot(batch_time.cpu().detach().numpy(), tac_inf[0,0,128,i,:,0].cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \phi)$')
+        plt.scatter(batch_time.cpu().detach().numpy(), data_curves[:,0,0, 128,i].cpu().detach().numpy(), c='k', label=r'obs. data')
+        plt.xticks([])
+        plt.yticks([])
+        plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+        plt.ylabel('[HU]', fontdict=font)
+        plt.xlabel('[s]', fontdict=font)
+        if plot_estimates:
+            plt.savefig(os.path.join(wandb.run.dir, f'tac_{i}_ep{ep}_est.png'), dpi=150, bbox_inches='tight')
+        else:
+            plt.savefig(os.path.join(wandb.run.dir, f'tac_{i}_ep{ep}_data.png'), dpi=150, bbox_inches='tight')
+        plt.close()  #
+    plt.figure(figsize=(5, 5))
+    if plot_estimates:
+        plt.plot(batch_time.cpu().detach().numpy(), aif_inf.cpu().detach().numpy(), c='k', label=r'$f_{AIF}(t, \theta)$')
+    plt.scatter(batch_time.cpu().detach().numpy(), data_dict['aif'], c='k', label=r'obs. data')
     plt.xticks([])
     plt.yticks([])
     plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))

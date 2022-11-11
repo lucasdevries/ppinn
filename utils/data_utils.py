@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import scipy.io
 import wandb
 from scipy.integrate import simpson
-
+from torch.utils.data import Dataset
 
 def load_data(gaussian_filter_type, sd=2.5,
               folder=r'data/DigitalPhantomCT',
@@ -50,7 +50,6 @@ def load_data(gaussian_filter_type, sd=2.5,
                aif_location[0]:aif_location[0] + aif_location[2],
                aif_location[1]:aif_location[1] + aif_location[2]]
     aif_data = np.mean(aif_data, axis=(1, 2))
-    print(aif_data)
     if method == 'ppinn' or method == 'nlr':
         # Correct aif for partial volume effect
         vof_baseline = np.mean(vof_data[:4]) if undersampling == 0.0 else np.mean(vof_data[:2])
@@ -317,6 +316,175 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     data_dict['aif_time'] = data_dict['time'][time_aif_location]
     data_dict['dwi_segmentation'] = dwi_segmentation
     return data_dict
+def load_data_spatiotemporal(gaussian_filter_type, sd=2.5,
+              folder=r'data/DigitalPhantomCT',
+              cbv_ml=5, simulation_method=2,
+              method='ppinn',
+              temporal_smoothing=False,
+              save_nifti=False,
+              baseline_zero=False,
+              undersampling=0.0):
+    print("Reading Dicom directory:", folder)
+    reader = sitk.ImageSeriesReader()
+    dicom_names = reader.GetGDCMSeriesFileNames(folder)
+    reader.SetFileNames(dicom_names)
+    image = reader.Execute()
+    image_data = sitk.GetArrayFromImage(image)
+    # values: AIF/VOF, Exp R(t) for CBV 1-5, Lin R(t) for CBV 1-5, Box R(t) for CBV 1-5,
+    image_data = rearrange(image_data, '(t values) h w -> values t h w', t=30)
+
+    image_data = image_data.astype(np.float32)
+    time = np.array([float(x) for x in range(0, 60, 2)])
+    if undersampling:
+        image_data, time = undersample(image_data, time, undersampling)
+    vof_location = (410, 247, 16)  # start, start, size
+    vof_data = image_data[0,
+               :,
+               vof_location[0]:vof_location[0] + vof_location[2],
+               vof_location[1]:vof_location[1] + vof_location[2]]
+    vof_data = np.mean(vof_data, axis=(1, 2))
+
+    aif_location = (123, 251, 8)  # start, start, size
+    aif_data = image_data[0,
+               :,
+               aif_location[0]:aif_location[0] + aif_location[2],
+               aif_location[1]:aif_location[1] + aif_location[2]]
+    aif_data = np.mean(aif_data, axis=(1, 2))
+    if method == 'ppinn' or method == 'nlr':
+        # Correct aif for partial volume effect
+        vof_baseline = np.mean(vof_data[:4]) if undersampling == 0.0 else np.mean(vof_data[:2])
+        aif_baseline = np.mean(aif_data[:4]) if undersampling == 0.0 else np.mean(vof_data[:2])
+        if undersampling == 0.25:
+            aif_baseline = np.mean(aif_data[:1])
+            vof_baseline = np.mean(vof_data[:1])
+        aif_wo_baseline = aif_data - aif_baseline
+        vof_wo_baseline = vof_data - vof_baseline
+        cumsum_aif = np.cumsum(aif_wo_baseline)[-1]
+        cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
+        ratio = cumsum_vof / cumsum_aif
+        aif_data = aif_wo_baseline * ratio + aif_baseline
+        print(aif_data)
+
+    if baseline_zero:
+        aif_baseline = np.mean(aif_data[:4])
+        aif_data = aif_data - aif_baseline
+        tac_baseline = np.expand_dims(np.mean(image_data[:, :4, ...], axis=1), axis=1)
+        image_data = image_data - tac_baseline
+
+    simulated_data_size = 32 * 7
+    scan_center = image_data.shape[-1] // 2
+    simulated_data_start = scan_center - simulated_data_size // 2
+    simulated_data_end = scan_center + simulated_data_size // 2
+    if gaussian_filter_type:
+        perfusion_data = image_data[1:, :,
+                         simulated_data_start:simulated_data_end,
+                         simulated_data_start:simulated_data_end]
+        perfusion_data = apply_gaussian_filter(gaussian_filter_type, perfusion_data.copy(), sd=sd)
+
+    else:
+        perfusion_data = image_data[1:, :,
+                         simulated_data_start:simulated_data_end,
+                         simulated_data_start:simulated_data_end]
+    perfusion_data = perfusion_data.astype(np.float32)
+
+    if save_nifti:
+        scipy.io.savemat(os.path.join('data', 'aif_data.mat'), {'aif': aif_data})
+        perfusion_data_nii = rearrange(perfusion_data, 'c t h w -> h w c t')
+        # scipy.io.savemat(os.path.join('data', 'image_data_sd_{}.mat'.format(sd)), {'image_data': perfusion_data_nii})
+        perfusion_data_nii = sitk.GetImageFromArray(perfusion_data_nii)
+        sitk.WriteImage(perfusion_data_nii, os.path.join('data', 'NLR_image_data_sd_{}.nii'.format(sd)))
+
+    if temporal_smoothing:
+        k = np.array([0.25, 0.5, 0.25])
+        aif_data = convolve(aif_data, k, mode='nearest')
+        k = k.reshape(1, 3, 1, 1)
+        perfusion_data = convolve(perfusion_data, k, mode='nearest')
+
+    perfusion_values = np.empty([5, 7, 7, 4])
+    cbv = [1, 2, 3, 4, 5]  # in ml / 100g
+    mtt_s = [24.0, 12.0, 8.0, 6.0, 4.8, 4.0, 3.42857143]  # in seconds
+    mtt_m = [t / 60 for t in mtt_s]  # in minutes
+    delay = [0., 0.5, 1., 1.5, 2., 2.5, 3.]  # in seconds
+
+    for ix, i in enumerate(cbv):
+        for jx, j in enumerate(delay):
+            for kx, k in enumerate(mtt_m):
+                # 0:'cbv', 1:'delay', 2:'mtt_m', 3:'cbf'
+                values = np.array([i, j, k, i / k])
+                perfusion_values[ix, jx, kx] = values
+    perfusion_values = repeat(perfusion_values, 'cbv h w values -> n cbv (h r1) (w r2) values', n=3, r1=32, r2=32)
+    perfusion_values_dict = {'cbf': perfusion_values[simulation_method, cbv_ml-1, ..., 3],
+                             'delay': perfusion_values[simulation_method, cbv_ml-1, ..., 1],
+                             'cbv': perfusion_values[simulation_method, cbv_ml-1, ..., 0],
+                             'mtt': perfusion_values[simulation_method, cbv_ml-1, ..., 2] * 60}
+    perfusion_values_dict['tmax'] = perfusion_values_dict['delay'] + 0.5 * perfusion_values_dict['mtt']
+    perfusion_data = rearrange(perfusion_data, '(n cbv) t h w -> n cbv h w t', n=3)
+
+    data_dict = {'aif': aif_data,
+                 'vof': vof_data,
+                 'time': time,
+                 'curves': perfusion_data[simulation_method:simulation_method + 1, cbv_ml-1:cbv_ml, :, :, :],
+                 'perfusion_values': perfusion_values[simulation_method:simulation_method + 1, cbv_ml-1:cbv_ml,
+                                     :, :, :]}
+
+    if method == 'ppinn':
+        data_dict = normalize_data(data_dict)
+        data_dict = get_coll_points(data_dict)
+        data_dict = get_tensors(data_dict)
+    elif method == 'nlr':
+        print('Data mode: nlr...')
+    else:
+        raise NotImplementedError('Data method not implemented.')
+
+
+    data_dict['time'] = np.tile(
+        data_dict['time'][..., np.newaxis, np.newaxis, np.newaxis],
+        (1, 224, 224,1),
+    ).astype(np.float32)
+    data_dict['time_inference_highres'] = np.tile(
+        data_dict['time_inference_highres'][..., np.newaxis, np.newaxis, np.newaxis],
+        (1, 224, 224,1),
+    ).astype(np.float32)
+    # create meshes
+    data_dict = create_mesh(data_dict)
+    data_dict = get_tensors(data_dict)
+    data_dict['perfusion_values_dict'] = perfusion_values_dict
+
+    return data_dict
+
+def create_mesh(data_dict):
+    mesh_x, mesh_y = np.meshgrid(
+        np.linspace(0, data_dict['time'].shape[1] - 1, num=data_dict['time'].shape[1]),
+        np.linspace(0, data_dict['time'].shape[2] - 1, num=data_dict['time'].shape[2]),
+    )
+    mesh_data = np.tile(
+        np.stack((mesh_x, mesh_y), axis=-1), (len(data_dict['time']), 1, 1, 1)
+    ).astype(np.float32)
+
+    mesh_data_hr = np.tile(
+        np.stack((mesh_x, mesh_y), axis=-1), (len(data_dict['time_inference_highres']), 1, 1,1)
+    ).astype(np.float32)
+
+    mesh_data_xy = np.tile(
+        np.stack((mesh_x, mesh_y), axis=-1), (1, 1, 1)
+    ).astype(np.float32)
+
+    data_dict['mesh_mean'] = mesh_data.mean()
+    data_dict['mesh_std'] = mesh_data.std()
+    data_dict['mesh_max'] = mesh_data.max()
+    data_dict['mesh_min'] = mesh_data.min()
+
+    mesh_data_hr = (mesh_data_hr - mesh_data.mean()) / mesh_data.std()
+    mesh_data_xy = (mesh_data_xy - mesh_data.mean()) / mesh_data.std()
+    mesh_data = (mesh_data - mesh_data.mean()) / mesh_data.std()
+
+    data_dict['coordinates'] = np.concatenate([data_dict['time'], mesh_data], axis=3)[np.newaxis, np.newaxis, ...]
+    data_dict['coordinates_xy_only'] = mesh_data_xy[np.newaxis, np.newaxis, ...]
+    data_dict['time_xy_highres'] = np.concatenate([data_dict['time_inference_highres'], mesh_data_hr], axis=3)[np.newaxis, np.newaxis, ...]
+    data_dict['coordinates'] = rearrange(data_dict['coordinates'], 'dim1 dim2 t x y vals -> dim1 dim2 x y t vals')
+    data_dict['time_xy_highres'] = rearrange(data_dict['time_xy_highres'],'dim1 dim2 t x y vals -> dim1 dim2 x y t vals')
+
+    return data_dict
 
 def read_nii_folder(folder):
     scans = sorted(glob.glob(folder))
@@ -348,6 +516,9 @@ def get_coll_points(data_dict):
         np.min(data_dict['time']), np.max(data_dict['time']), len(data_dict['time']) * 5 * 10 * 3
     ).astype(np.float32)
     data_dict['bound'] = np.array([np.min(data_dict['time'])])
+    data_dict['coll_points_max'] = np.max(data_dict['coll_points'])
+    data_dict['coll_points_min'] = np.min(data_dict['coll_points'])
+
     return data_dict
 
 
@@ -503,3 +674,13 @@ def np2itk(arr, original_img):
     # this does not allow cropping (such as removing thorax, neck)
     img.CopyInformation(original_img)
     return img
+
+class CurveDataset(Dataset):
+    def __init__(self, data_curves, data_coordinates, collo_coordinates):
+        self.data_curves = data_curves
+        self.data_coordinates = data_coordinates
+        self.collo_coordinates = collo_coordinates
+    def __len__(self):
+        return len(self.data_curves)
+    def __getitem__(self, idx):
+        return self.data_curves[idx], self.data_coordinates[idx], self.collo_coordinates[idx]
