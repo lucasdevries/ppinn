@@ -131,13 +131,19 @@ def train_amc(config):
                                     case=case)
 
             result_dict = drop_unphysical_amc(result_dict)
+
+            mask_data = mask_data.cpu().numpy()
+            for key in result_dict.keys():
+                result_dict[key] *= mask_data
+
             cbf_results[slice, ...] = result_dict['cbf']
             cbv_results[slice, ...] = result_dict['cbv']
             mtt_results[slice, ...] = result_dict['mtt']
             delay_results[slice, ...] = result_dict['delay']
             tmax_results[slice, ...] = result_dict['tmax']
-            break
+
             visualize_amc(case, slice, result_dict, data_dict)
+            break
             # visualize_amc_sygno(case, slice, sygnovia_results, data_dict)
 
         # save maps as sitks

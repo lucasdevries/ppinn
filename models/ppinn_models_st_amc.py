@@ -249,6 +249,8 @@ class PPINN_amc(nn.Module):
 
     def get_ode_params(self):
         # data_coordinates_xy = rearrange(self.data_coordinates_xy, 'dum1 dum2 x y val-> (dum1 dum2 x y) val')
+        # ones = torch.ones([512,512])
+        # ones[self.original_data_indices] = 0
 
         params = self.NN_ode(self.data_coordinates_xy)
         result = torch.zeros([512, 512, 3])
@@ -260,7 +262,15 @@ class PPINN_amc(nn.Module):
 
         if self.log_domain:
             # print(24 * torch.exp(self.flow_mtt))
-            return [torch.exp(self.flow_cbf), 24 * torch.exp(self.flow_mtt), 3 * torch.exp(self.flow_t_delay)]
+            self.flow_cbf = torch.exp(self.flow_cbf)
+            self.flow_mtt = 24 * torch.exp(self.flow_mtt)
+            self.flow_t_delay = 3 * torch.exp(self.flow_t_delay)
+
+            # self.flow_cbf[torch.nonzero(ones)] = 0
+            # self.flow_mtt[torch.nonzero(ones)] = 0
+            # self.flow_t_delay[torch.nonzero(ones)] = 0
+
+            return [self.flow_cbf, self.flow_mtt, self.flow_t_delay]
         else:
             return [self.flow_cbf, 24 * self.flow_mtt, 3 * self.flow_t_delay]
 
@@ -282,7 +292,7 @@ class PPINN_amc(nn.Module):
     def get_cbf(self, seconds=True):
         density = 1.05
         constant = (100 / density) * 0.55 / 0.75
-        constant = torch.as_tensor(constant).to(self.device)
+        constant = torch.as_tensor(constant)#.to(self.device)
         flow, _, _ = self.get_ode_params()
         if seconds:
             return constant * flow
@@ -454,10 +464,10 @@ class PPINN_amc(nn.Module):
             self.epoch += 1
 
         # get results
-        cbf = rearrange(self.get_cbf(seconds=False).squeeze(), '(x y) -> x y', x=512).cpu()
-        mtt = rearrange(self.get_mtt(seconds=True).squeeze(), '(x y) -> x y', x=512).cpu()
-        mtt_min = rearrange(self.get_mtt(seconds=False).squeeze(), '(x y) -> x y', x=512).cpu()
-        delay = rearrange(self.get_delay(seconds=True).squeeze(), '(x y) -> x y', x=512).cpu()
+        cbf = self.get_cbf(seconds=False).squeeze()
+        mtt = self.get_mtt(seconds=True).squeeze()
+        mtt_min = self.get_mtt(seconds=False).squeeze()
+        delay = self.get_delay(seconds=True).squeeze()
 
         cbv = cbf * mtt_min
         tmax = delay + 0.5*mtt

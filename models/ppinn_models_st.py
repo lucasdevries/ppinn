@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from models.MLP_st import MLP, MLP_ODE
+from models.MLP_st import MLP, MLP_ODE, MLP_siren, MLP_ODE_siren
 from utils.train_utils import AverageMeter, weightConstraint
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
@@ -66,16 +66,6 @@ class PPINN(nn.Module):
         bn = config.bn
         self.batch_size = config.batch_size
         self.data_coordinates_xy = None
-        self.NN_tissue = MLP(
-            self.shape_in,
-            False,
-            n_layers,
-            n_units,
-            n_inputs=3,
-            neurons_out=1,
-            bn=bn,
-            act='tanh'
-        )
         self.NN_aif = MLP(
             self.shape_in,
             True,
@@ -86,9 +76,39 @@ class PPINN(nn.Module):
             bn=bn,
             act='tanh'
         )
+        if self.config.siren:
+            print('using SirenNets')
+            self.NN_tissue = MLP_siren(
+                            dim_in=3,  # input dimension, ex. 2d coor
+                            dim_hidden=n_units,  # hidden dimension
+                            dim_out=1,  # output dimension, ex. rgb value
+                            num_layers=n_layers,  # number of layers
+                            final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+                            w0_initial=self.config.siren_w0
+                            # different signals may require different omega_0 in the first layer - this is a hyperparameter
+                        )
+            # self.NN_ode = MLP_ODE_siren(
+            #                         dim_in=2,  # input dimension, ex. 2d coor
+            #                         dim_hidden=16,  # hidden dimension
+            #                         dim_out=3,  # output dimension, ex. rgb value
+            #                         num_layers=n_layers,  # number of layers
+            #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+            #                         w0_initial=self.config.siren_w0
+            #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
+            #                     )
+        else:
+            self.NN_tissue = MLP(
+                self.shape_in,
+                False,
+                n_layers,
+                n_units,
+                n_inputs=3,
+                neurons_out=1,
+                bn=bn,
+                act='tanh'
+            )
+
         self.NN_ode = MLP_ODE(
-            # self.config.factor//2*n_layers,
-            # self.config.factor*n_units,
             n_layers,
             n_units,
             n_inputs=2,
@@ -96,6 +116,7 @@ class PPINN(nn.Module):
             bn=bn,
             act='tanh'
         )
+
         self.ema = EMA(
             self.NN_ode,
             beta = 0.9999,
@@ -376,7 +397,7 @@ class PPINN(nn.Module):
                 except:
                     continue
 
-            if self.epoch%10==0:
+            if self.epoch%5==0:
                 data_curves = rearrange(data_curves, ' (dum1 dum2 x y t ) val-> (t val) dum1 dum2 x y', dum1=1, dum2=1,
                                         x=224,
                                         y=224, t=timepoints)
