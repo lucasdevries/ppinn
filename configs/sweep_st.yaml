@@ -1,0 +1,27 @@
+program: main_st.py
+method: grid
+parameters:
+  sd:
+    values:
+      - 1
+  cbv_ml:
+    values:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+  factor:
+    values:
+      - 1
+  epochs:
+    values:
+      - 60
+  lr:
+    values:
+      - 1e-3
+command:
+  - ${env}
+  - python
+  - ${program}
+  - configs\spatiotemporal.json

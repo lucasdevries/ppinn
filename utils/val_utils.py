@@ -807,7 +807,7 @@ def add_colorbars_to_fig_difference_free(fig, ax, gt_axis):
         x.axes.yaxis.set_ticks([])
     # plt.tight_layout()
 
-def log_software_results(results, cbv_ml, corrected=False):
+def log_software_results(results, cbv_ml, corrected=False, wandb_on=True):
     for metric in ['mse', 'mae', 'me']:
         table = []
         for key in ['cbf', 'cbv', 'mtt', 'delay', 'tmax']:
@@ -830,9 +830,12 @@ def log_software_results(results, cbv_ml, corrected=False):
                 raise NotImplementedError('Not implemented')
         columns = ['cbv_ml', 'parameter', 'NLR', 'Sygnovia', 'PPINN']
         df = pd.DataFrame(columns=['cbv_ml', 'parameter', 'NLR', 'Sygnovia', 'PPINN'], data=table)
-        wandb_table = wandb.Table(data=df)
-        # wandb_table = wandb.Table(data=table, columns=columns)
-        wandb.log({f'table_{metric}': wandb_table}) if not corrected else wandb.log({f'table_{metric}_cor': wandb_table})
+        if wandb_on:
+            wandb_table = wandb.Table(data=df)
+            # wandb_table = wandb.Table(data=table, columns=columns)
+            wandb.log({f'table_{metric}': wandb_table}) if not corrected else wandb.log({f'table_{metric}_cor': wandb_table})
+        else:
+            return df
 def drop_edges(results):
     skip_rows = sorted(list(range(-2, 226, 32)) + list(range(-1, 226, 32)) + list(range(0, 226, 32)) + list(range(1, 226, 32)))
     skip_rows = skip_rows[2:-2]
@@ -1023,6 +1026,8 @@ def plot_curves_at_epoch_phantom(data_dict, data_curves, device, forward_NNs, ep
     plt.close()
 
 def plot_curves_at_epoch_phantom_st(data_dict, batch_time, data_curves, device, forward_NNs, ep, plot_estimates):
+
+    os.makedirs(os.path.join(wandb.run.dir, 'curves'), exist_ok=True)
     nn_tissue_input = data_dict['coordinates'].to(device)
     with torch.no_grad():
         aif_inf, tac_inf = forward_NNs(batch_time, nn_tissue_input)
@@ -1048,9 +1053,9 @@ def plot_curves_at_epoch_phantom_st(data_dict, batch_time, data_curves, device, 
         plt.ylabel('[HU]', fontdict=font)
         plt.xlabel('[s]', fontdict=font)
         if plot_estimates:
-            plt.savefig(os.path.join(wandb.run.dir, f'tac_{i}_ep{ep}_est.png'), dpi=150, bbox_inches='tight')
+            plt.savefig(os.path.join(wandb.run.dir, 'curves', f'tac_{i}_ep{ep}_est.png'), dpi=150, bbox_inches='tight')
         else:
-            plt.savefig(os.path.join(wandb.run.dir, f'tac_{i}_ep{ep}_data.png'), dpi=150, bbox_inches='tight')
+            plt.savefig(os.path.join(wandb.run.dir, 'curves', f'tac_{i}_ep{ep}_data.png'), dpi=150, bbox_inches='tight')
         plt.close()  #
     plt.figure(figsize=(5, 5))
     if plot_estimates:
@@ -1062,7 +1067,57 @@ def plot_curves_at_epoch_phantom_st(data_dict, batch_time, data_curves, device, 
     plt.ylabel('[HU]', fontdict=font)
     plt.xlabel('[s]', fontdict=font)
     if plot_estimates:
-        plt.savefig(os.path.join(wandb.run.dir, f'aif_ep_{ep}_est.png'), dpi=150, bbox_inches='tight')
+        plt.savefig(os.path.join(wandb.run.dir, 'curves', f'aif_ep_{ep}_est.png'), dpi=150, bbox_inches='tight')
     else:
-        plt.savefig(os.path.join(wandb.run.dir, f'aif_ep_{ep}_data.png'), dpi=150, bbox_inches='tight')
+        plt.savefig(os.path.join(wandb.run.dir, 'curves', f'aif_ep_{ep}_data.png'), dpi=150, bbox_inches='tight')
+    plt.close()
+
+def plot_curves_at_epoch_amc_st(data_dict, data_curves, device, forward_NNs, ep, case, slice, plot_estimates):
+    os.makedirs(os.path.join(wandb.run.dir, 'curves'), exist_ok=True)
+
+    time_hr = data_dict['coordinates_highres']
+    data_time_inf = time_hr.to(device)
+    time_aif = data_time_inf[0,0,:, :1]
+
+    with torch.no_grad():
+        aif_inf, tac_inf = forward_NNs(time_aif, data_time_inf)
+    font = {'family': 'serif',
+            'color': 'black',
+            'weight': 'normal',
+            'size': 24,
+            }
+    data_time_inf = data_time_inf.cpu()
+    time_aif = time_aif.cpu()
+    tac_inf= tac_inf.cpu()
+    for i in range(200,400,5):
+        if data_curves[200, i,0 ] == 0:
+            continue
+        plt.figure(figsize=(5, 5))
+        if plot_estimates:
+            plt.plot(time_aif.cpu().detach().numpy(), tac_inf[200,i,:,0].cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \phi)$')
+        plt.scatter(data_dict['aif_time'][:,0,0].cpu().detach().numpy(), data_curves[200, i], c='k',
+                 label=r'$f_{TAC}(t, \phi)$')
+        plt.xticks([])
+        plt.yticks([])
+        plt.ylim(0,0.20)
+        plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+        plt.ylabel('[HU]', fontdict=font)
+        plt.xlabel('[s]', fontdict=font)
+        if plot_estimates:
+            plt.savefig(os.path.join(wandb.run.dir, 'curves',f'tac_case_{case}_{i}_sl{slice}_ep{ep}_est.png'), dpi=70, bbox_inches='tight')
+        else:
+            plt.savefig(os.path.join(wandb.run.dir, 'curves',f'tac_case_{case}_{i}_sl{slice}_ep{ep}_data.png'), dpi=70, bbox_inches='tight')
+        plt.close()  #
+    plt.figure(figsize=(5, 5))
+    if plot_estimates:
+        plt.plot(aif_inf.cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
+    plt.xticks([])
+    plt.yticks([])
+    plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.ylabel('[HU]', fontdict=font)
+    plt.xlabel('[s]', fontdict=font)
+    if plot_estimates:
+        plt.savefig(os.path.join(wandb.run.dir, 'curves',f'aif_case_{case}_sl{slice}_ep_{ep}_est.png'), dpi=70, bbox_inches='tight')
+    else:
+        plt.savefig(os.path.join(wandb.run.dir, 'curves',f'aif_case_{case}_sl{slice}_ep_{ep}_data.png'), dpi=70, bbox_inches='tight')
     plt.close()

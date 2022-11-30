@@ -104,19 +104,10 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(slices)[6:]):
-            brainmask_data = data_dict['brainmask'][slice]
-            vessel_data = data_dict['vesselmask'][slice]
-            valid_voxels = torch.where((brainmask_data == 1) & (vessel_data == 0))
-            # new = np.zeros_like(vessel_data)
-            # new[valid_voxels] = 1
-            # fig, ax = plt.subplots(1,3)
-            # ax[0].imshow(brainmask_data)
-            # ax[1].imshow(vessel_data)
-            # ax[2].imshow(new)
-            # plt.show()
-            # continue
-            # valid_voxels = torch.where((brainmask_data == 1) & (vessel_data == 0))
+        for slice in tqdm(range(slices)):
+            mask_data = data_dict['mask'][slice]
+            valid_voxels = torch.where(mask_data == 1)
+
             shape_in = torch.Size([1, len(valid_voxels[0]), 1])
             if len(valid_voxels[0]) == 0:
                 cbf_results[slice, ...] = np.zeros([512, 512])
@@ -154,7 +145,8 @@ def train_amc(config):
                                                  cbv_results,
                                                  mtt_results,
                                                  delay_results,
-                                                 tmax_results
+                                                 tmax_results,
+                                                 data_dict
                                                 )
 
 def train_isles(config):

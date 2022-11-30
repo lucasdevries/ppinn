@@ -2,8 +2,9 @@ import os
 from utils import data_utils, train_utils
 from utils.config import process_config
 import wandb
-from models.ppinn_models_st import PPINN
+from models.ppinn_models_st_twoste import PPINN
 from models.ppinn_models_st_amc import PPINN_amc
+
 import numpy as np
 import argparse
 from tqdm import tqdm
@@ -92,10 +93,10 @@ def train_amc(config):
     cases = os.listdir(r'D:/PPINN_patient_data/AMCCTP/CTP_nii_registered')
     for case in tqdm(cases):
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
-        data_dict = data_utils.load_data_AMC_spatiotemporal(gaussian_filter_type=config.filter_type,
+        data_dict = data_utils.load_data_AMC(gaussian_filter_type=config.filter_type,
                                              sd=config.sd,
                                              case=case)
-
+        sygnovia_results = load_sygnovia_results_amc(case)
         scan_dimensions = data_dict['curves'].shape[:-1]
         slices = scan_dimensions[0]
         cbf_results = np.zeros([*scan_dimensions], dtype=np.float32)
@@ -104,9 +105,11 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(slices)[6:]):
-            mask_data = data_dict['mask'][slice]
-            valid_voxels = torch.where(mask_data == 1)
+        for slice in tqdm(range(slices)):
+            brainmask_data = data_dict['brainmask'][slice]
+            tissue_data = data_dict['tissuemask'][slice]
+            vessel_data = data_dict['tissuemask'][slice]
+            valid_voxels = torch.where((brainmask_data == 1) & (tissue_data == 1) & (vessel_data == 0))
             shape_in = torch.Size([1, len(valid_voxels[0]), 1])
             if len(valid_voxels[0]) == 0:
                 cbf_results[slice, ...] = np.zeros([512, 512])
@@ -115,7 +118,6 @@ def train_amc(config):
                 delay_results[slice, ...] = np.zeros([512, 512])
                 tmax_results[slice, ...] = np.zeros([512, 512])
                 continue
-
             ppinn = PPINN_amc(config,
                               shape_in=shape_in,
                               n_inputs=1,
@@ -123,7 +125,6 @@ def train_amc(config):
                               original_data_shape=scan_dimensions[1:],
                               original_indices=valid_voxels
                               )
-
             result_dict = ppinn.fit(slice,
                                     data_dict,
                                     batch_size=config.batch_size,
@@ -136,7 +137,6 @@ def train_amc(config):
             mtt_results[slice, ...] = result_dict['mtt']
             delay_results[slice, ...] = result_dict['delay']
             tmax_results[slice, ...] = result_dict['tmax']
-            break
             visualize_amc(case, slice, result_dict, data_dict)
             # visualize_amc_sygno(case, slice, sygnovia_results, data_dict)
 

@@ -99,12 +99,12 @@ class PPINN_amc(nn.Module):
         self.float()
 
 
-    def forward_NNs(self, t, t_aif):
+    def forward_NNs(self, t_tissue, t_aif):
         # Used for the data loss only
-        t = t.unsqueeze(-1)
+        t_tissue = t_tissue.unsqueeze(-1)
         t_aif = t_aif.unsqueeze(-1)
 
-        c_tissue = self.NN_tissue(t)
+        c_tissue = self.NN_tissue(t_tissue)
         c_aif = self.NN_aif(t_aif)
         return c_aif, c_tissue
 
