@@ -130,10 +130,11 @@ def train_amc(config):
                                     epochs=int(config.epochs),
                                     case=case)
 
-            result_dict = drop_unphysical_amc(result_dict)
+            # result_dict = drop_unphysical_amc(result_dict)
 
             mask_data = mask_data.cpu().numpy()
             for key in result_dict.keys():
+                result_dict[key] = result_dict[key].cpu().detach().numpy()
                 result_dict[key] *= mask_data
 
             cbf_results[slice, ...] = result_dict['cbf']

@@ -58,12 +58,12 @@ class PPINN_amc(nn.Module):
         self.delay_type = self.config.delay_type
         self.cbf_type = self.config.cbf_type
         self.mtt_type = self.config.mtt_type
-        # self.set_delay_parameter()
-        # self.set_cbf_parameter()
-        # self.set_mtt_parameter()
-        self.flow_cbf = None
-        self.flow_t_delay = None
-        self.flow_mtt = None
+        self.set_delay_parameter()
+        self.set_cbf_parameter()
+        self.set_mtt_parameter()
+        # self.flow_cbf = None
+        # self.flow_t_delay = None
+        # self.flow_mtt = None
         self.constraint = weightConstraint()
         self.aif_training_off = False
         self.tissue_training_off = False
@@ -144,7 +144,7 @@ class PPINN_amc(nn.Module):
         c_aif = self.NN_aif(aif_time, xy)
         return c_aif, c_tissue
 
-    def forward_complete(self, aif_time, txy):
+    def forward_complete(self, aif_time, txy, indices):
         t = txy[...,:1]
         xy = txy[...,1:]
         # t = t.unsqueeze(-1)
@@ -158,20 +158,23 @@ class PPINN_amc(nn.Module):
         t = t.detach()
         t.requires_grad = False
 
-        params = self.NN_ode(xy)
-        if self.log_domain:
-            cbf = torch.exp(params[..., :1])
-            mtt = 24*torch.exp(params[..., 1:2])
-            delay = 3*torch.exp(params[..., 2:])
-        else:
-            cbf = params[..., :1]
-            mtt = 24*params[..., 1:2]
-            delay = 3*params[..., 2:]
+        # params = self.NN_ode(xy)
+        # if self.log_domain:
+        #     cbf = torch.exp(params[..., :1])
+        #     mtt = 24*torch.exp(params[..., 1:2])
+        #     delay = 3*torch.exp(params[..., 2:])
+        # else:
+        #     cbf = params[..., :1]
+        #     mtt = 24*params[..., 1:2]
+        #     delay = 3*params[..., 2:]
+
+        cbf, mtt, delay = self.get_ode_params()
+        cbf, mtt, delay = cbf[indices], mtt[indices].unsqueeze(-1), delay[indices].unsqueeze(-1)
 
         c_aif_a = self.NN_aif(t - delay / self.std_t, xy)
         c_aif_b = self.NN_aif(t - delay / self.std_t - mtt / self.std_t, xy)
 
-        residual = c_tissue_dt.squeeze() - cbf.squeeze() * (c_aif_a - c_aif_b).squeeze()
+        residual = c_tissue_dt - cbf * (c_aif_a - c_aif_b).unsqueeze(-1)
         return c_aif, c_tissue, residual
 
     def set_loss_weights(self, loss_weights):
@@ -201,14 +204,22 @@ class PPINN_amc(nn.Module):
         # ones = torch.ones([512,512])
         # ones[self.original_data_indices] = 0
 
-        params = self.NN_ode(self.data_coordinates_xy)
-        result = torch.zeros([512, 512, 3])
-        result[self.original_data_indices] = params.cpu()
+        # params = self.NN_ode(self.data_coordinates_xy)
+        # result = torch.zeros([512, 512, 3])
+        # result[self.original_data_indices] = params.cpu()
+        #
+        # self.flow_cbf = result[..., :1]
+        # self.flow_mtt = result[..., 1:2]
+        # self.flow_t_delay = result[..., 2:]
 
-        self.flow_cbf = result[..., :1]
-        self.flow_mtt = result[..., 1:2]
-        self.flow_t_delay = result[..., 2:]
-
+        # cbf = torch.zeros([512, 512]).to(self.device)
+        # cbf[self.original_data_indices] = self.flow_cbf
+        #
+        # mtt = torch.zeros([512, 512]).to(self.device)
+        # mtt[self.original_data_indices] = self.flow_mtt
+        #
+        # t_delay = torch.zeros([512, 512]).to(self.device)
+        # t_delay[self.original_data_indices] = self.flow_t_delay
 
         if self.log_domain:
             return [torch.exp(self.flow_cbf), 24 * torch.exp(self.flow_mtt), 3 * torch.exp(self.flow_t_delay)]
@@ -270,7 +281,7 @@ class PPINN_amc(nn.Module):
         data_curves = rearrange(data_curves, 'dum1 (t val)-> (dum1  t ) val', val=1)
         data_coordinates = rearrange(data_coordinates, 'dum1 t val-> (dum1 t ) val')
         collocation_coordinates = rearrange(collocation_txys, 'dum1 t val -> (dum1  t ) val')
-        # data_indices = rearrange(data_indices, 'dum1 t val-> (dum1 t ) val')
+        data_indices = rearrange(data_indices, 'dum1 t val-> (dum1 t ) val')
 
         t = data_coordinates[..., :1]
         xy = data_coordinates[..., 1:]
@@ -296,12 +307,29 @@ class PPINN_amc(nn.Module):
                     dpi=70, bbox_inches='tight')
         plt.close()
 
-        cbf = self.get_cbf(seconds=False).squeeze()
-        mtt = self.get_mtt(seconds=True).squeeze()
-        mtt_min = self.get_mtt(seconds=False).squeeze()
-        delay = self.get_delay(seconds=True).squeeze()
+        cbf = torch.zeros([512, 512]).to(self.device)
+        cbf[self.original_data_indices] = self.get_cbf(seconds=False).squeeze()
+
+        mtt = torch.zeros([512, 512]).to(self.device)
+        mtt[self.original_data_indices] = self.get_mtt(seconds=True).squeeze()
+
+        mtt_min = torch.zeros([512, 512]).to(self.device)
+        mtt_min[self.original_data_indices] = self.get_mtt(seconds=False).squeeze()
+
+        delay = torch.zeros([512, 512]).to(self.device)
+        delay[self.original_data_indices] = self.get_delay(seconds=True).squeeze()
+
         cbv = cbf * mtt_min
         tmax = delay + 0.5*mtt
+
+        # cbf = torch.zeros([512, 512]).to(self.device)
+        # cbf[self.original_data_indices] = self.flow_cbf
+        #
+        # mtt = torch.zeros([512, 512]).to(self.device)
+        # mtt[self.original_data_indices] = self.flow_mtt
+        #
+        # t_delay = torch.zeros([512, 512]).to(self.device)
+        # t_delay[self.original_data_indices] = self.flow_t_delay
 
         result_dict = {'cbf': cbf,
                 'cbv': cbv,
@@ -313,7 +341,7 @@ class PPINN_amc(nn.Module):
         mask_data = mask_data.cpu().numpy()
         for key in result_dict.keys():
             result_dict[key] = result_dict[key].cpu().detach().numpy()
-            result_dict[key] *= mask_data
+            # result_dict[key] *= mask_data
         visualize_amc(case, slice, result_dict, data_dict)
 
         for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
@@ -327,7 +355,7 @@ class PPINN_amc(nn.Module):
                 data_dict['coll_points_min'],
                 data_dict['coll_points_max'])
             # curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
-            curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
+            curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates, data_indices)
             dataloader = DataLoader(curve_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
             epoch_aif_loss = AverageMeter()
@@ -335,10 +363,11 @@ class PPINN_amc(nn.Module):
             epoch_residual_loss = AverageMeter()
             iter = 0
 
-            for batch_curves, batch_coordinates, batch_collo in dataloader:
+            for batch_curves, batch_coordinates, batch_collo, batch_indices in dataloader:
                 batch_curves = batch_curves.to(self.device)
                 batch_coordinates = batch_coordinates.to(self.device)
                 batch_collo = batch_collo.to(self.device)
+                batch_indices = batch_indices.to(self.device)
 
                 batch_aif = data_aif.to(self.device)
                 batch_time = data_time[:, 0, 0, :].to(self.device)
@@ -348,8 +377,8 @@ class PPINN_amc(nn.Module):
                                                                      batch_aif,
                                                                      batch_curves,
                                                                      batch_boundary,
-                                                                     batch_collo
-                                                                     )
+                                                                     batch_collo,
+                                                                     batch_indices)
                 epoch_aif_loss.update(loss_aif.item())
                 epoch_tissue_loss.update(loss_tissue.item())
                 epoch_residual_loss.update(loss_residual.item())
@@ -482,8 +511,8 @@ class PPINN_amc(nn.Module):
                  batch_aif,
                  batch_curves,
                  batch_boundary,
-                 batch_collo
-                ):
+                 batch_collo,
+                 batch_indices):
         # self.train()
         # self.optimizer.zero_grad()
         batch_coordinates.requires_grad = True
@@ -503,7 +532,7 @@ class PPINN_amc(nn.Module):
 
         if self.lw_res:
             # compute residual loss
-            c_aif, c_tissue, residual = self.forward_complete(batch_time, batch_collo)
+            c_aif, c_tissue, residual = self.forward_complete(batch_time, batch_collo, batch_indices)
             loss_residual = self.__loss_residual(residual)
             loss += self.lw_res * loss_residual
         #     # compute data loss
@@ -593,49 +622,49 @@ class PPINN_amc(nn.Module):
         )[0]
         return out
 
-    #
-    # def set_delay_parameter(self):
-    #     if self.delay_type == 'learned':
-    #         self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-    #         torch.nn.init.uniform_(self.flow_t_delay, 0.5, 1)
-    #     elif self.delay_type == 'fixed':
-    #         if self.log_domain:
-    #             self.flow_t_delay = torch.log(self.perfusion_values[..., 1] / 3)
-    #         else:
-    #             self.flow_t_delay = self.perfusion_values[..., 1] / 3
-    #         self.flow_t_delay = self.flow_t_delay.view(*self.flow_t_delay.shape, 1, 1)
-    #         self.flow_t_delay = self.flow_t_delay.to(self.device)
-    #     else:
-    #         raise NotImplementedError('Delay type not implemented...')
-    #
-    # def set_cbf_parameter(self):
-    #     low = 0
-    #     high = 100 / (69.84 * 60)
-    #     density = 1.05
-    #     constant = (100 / density) * 0.55 / 0.75
-    #     if self.cbf_type == 'learned':
-    #         self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
-    #         torch.nn.init.uniform_(self.flow_cbf, 0.5 * high, high)
-    #     elif self.cbf_type == 'fixed':
-    #         if self.log_domain:
-    #             self.flow_cbf = torch.log(self.perfusion_values[..., 3] / (constant * 60))
-    #         else:
-    #             self.flow_cbf = self.perfusion_values[..., 3] / (constant * 60)
-    #         self.flow_cbf = self.flow_cbf.view(*self.flow_cbf.shape, 1)
-    #         self.flow_cbf = self.flow_cbf.to(self.device)
-    #     else:
-    #         raise NotImplementedError('Delay type not implemented...')
-    #
-    # def set_mtt_parameter(self):
-    #     if self.mtt_type == 'learned':
-    #         self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-    #         torch.nn.init.uniform_(self.flow_mtt, 0.75, 1)
-    #     elif self.mtt_type == 'fixed':
-    #         if self.log_domain:
-    #             self.flow_mtt = torch.log(self.perfusion_values[..., 2] * 60 / 24)
-    #         else:
-    #             self.flow_mtt = self.perfusion_values[..., 2] * 60 / 24
-    #         self.flow_mtt = self.flow_mtt.view(*self.flow_cbf.shape, 1)
-    #         self.flow_mtt = self.flow_mtt.to(self.device)
-    #     else:
-    #         raise NotImplementedError('Delay type not implemented...')
+
+    def set_delay_parameter(self):
+        if self.delay_type == 'learned':
+            self.flow_t_delay = torch.nn.Parameter(torch.rand(self.shape_in[1]))
+            torch.nn.init.uniform_(self.flow_t_delay, 0.5, 1)
+        elif self.delay_type == 'fixed':
+            if self.log_domain:
+                self.flow_t_delay = torch.log(self.perfusion_values[..., 1] / 3)
+            else:
+                self.flow_t_delay = self.perfusion_values[..., 1] / 3
+            self.flow_t_delay = self.flow_t_delay.view(*self.flow_t_delay.shape, 1, 1)
+            self.flow_t_delay = self.flow_t_delay.to(self.device)
+        else:
+            raise NotImplementedError('Delay type not implemented...')
+
+    def set_cbf_parameter(self):
+        low = 0
+        high = 100 / (69.84 * 60)
+        density = 1.05
+        constant = (100 / density) * 0.55 / 0.75
+        if self.cbf_type == 'learned':
+            self.flow_cbf = torch.nn.Parameter(torch.rand(self.shape_in[1]) * high)
+            torch.nn.init.uniform_(self.flow_cbf, 0.5 * high, high)
+        elif self.cbf_type == 'fixed':
+            if self.log_domain:
+                self.flow_cbf = torch.log(self.perfusion_values[..., 3] / (constant * 60))
+            else:
+                self.flow_cbf = self.perfusion_values[..., 3] / (constant * 60)
+            self.flow_cbf = self.flow_cbf.view(*self.flow_cbf.shape, 1)
+            self.flow_cbf = self.flow_cbf.to(self.device)
+        else:
+            raise NotImplementedError('Delay type not implemented...')
+
+    def set_mtt_parameter(self):
+        if self.mtt_type == 'learned':
+            self.flow_mtt = torch.nn.Parameter(torch.rand(self.shape_in[1]))
+            torch.nn.init.uniform_(self.flow_mtt, 0.75, 1)
+        elif self.mtt_type == 'fixed':
+            if self.log_domain:
+                self.flow_mtt = torch.log(self.perfusion_values[..., 2] * 60 / 24)
+            else:
+                self.flow_mtt = self.perfusion_values[..., 2] * 60 / 24
+            self.flow_mtt = self.flow_mtt.view(*self.flow_cbf.shape, 1)
+            self.flow_mtt = self.flow_mtt.to(self.device)
+        else:
+            raise NotImplementedError('Delay type not implemented...')

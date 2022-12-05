@@ -231,51 +231,6 @@ class PPINN(nn.Module):
             if 'flow' in name:
                 param.data = torch.log(param.data) if self.log_domain else param.data
 
-    def set_delay_parameter(self):
-        if self.delay_type == 'learned':
-            self.flow_t_delay = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-            torch.nn.init.uniform_(self.flow_t_delay, 0.5, 1)
-        elif self.delay_type == 'fixed':
-            if self.log_domain:
-                self.flow_t_delay = torch.log(self.perfusion_values[..., 1] / 3)
-            else:
-                self.flow_t_delay = self.perfusion_values[..., 1] / 3
-            self.flow_t_delay = self.flow_t_delay.view(*self.flow_t_delay.shape, 1, 1)
-            self.flow_t_delay = self.flow_t_delay.to(self.device)
-        else:
-            raise NotImplementedError('Delay type not implemented...')
-
-    def set_cbf_parameter(self):
-        low = 0
-        high = 100 / (69.84 * 60)
-        density = 1.05
-        constant = (100 / density) * 0.55 / 0.75
-        if self.cbf_type == 'learned':
-            self.flow_cbf = torch.nn.Parameter(torch.rand(*self.shape_in, 1) * high)
-            torch.nn.init.uniform_(self.flow_cbf, 0.5 * high, high)
-        elif self.cbf_type == 'fixed':
-            if self.log_domain:
-                self.flow_cbf = torch.log(self.perfusion_values[..., 3] / (constant * 60))
-            else:
-                self.flow_cbf = self.perfusion_values[..., 3] / (constant * 60)
-            self.flow_cbf = self.flow_cbf.view(*self.flow_cbf.shape, 1)
-            self.flow_cbf = self.flow_cbf.to(self.device)
-        else:
-            raise NotImplementedError('Delay type not implemented...')
-
-    def set_mtt_parameter(self):
-        if self.mtt_type == 'learned':
-            self.flow_mtt = torch.nn.Parameter(torch.rand(*self.shape_in, 1, 1))
-            torch.nn.init.uniform_(self.flow_mtt, 0.75, 1)
-        elif self.mtt_type == 'fixed':
-            if self.log_domain:
-                self.flow_mtt = torch.log(self.perfusion_values[..., 2] * 60 / 24)
-            else:
-                self.flow_mtt = self.perfusion_values[..., 2] * 60 / 24
-            self.flow_mtt = self.flow_mtt.view(*self.flow_cbf.shape, 1)
-            self.flow_mtt = self.flow_mtt.to(self.device)
-        else:
-            raise NotImplementedError('Delay type not implemented...')
 
     def get_ode_params(self):
         data_coordinates_xy = rearrange(self.data_coordinates_xy, 'dum1 dum2 x y val-> (dum1 dum2 x y) val')
@@ -397,7 +352,7 @@ class PPINN(nn.Module):
                 except:
                     continue
 
-            if self.epoch%5==0:
+            if self.epoch%20==0:
                 data_curves = rearrange(data_curves, ' (dum1 dum2 x y t ) val-> (t val) dum1 dum2 x y', dum1=1, dum2=1,
                                         x=224,
                                         y=224, t=timepoints)

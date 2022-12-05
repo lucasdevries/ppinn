@@ -609,6 +609,8 @@ def create_mesh_amc(data_dict):
     data_dict['mesh_max'] = mesh_data.max()
     data_dict['mesh_min'] = mesh_data.min()
 
+    data_dict['indices'] = mesh_data
+
     mesh_data_hr = (mesh_data_hr - mesh_data.mean()) / mesh_data.std()
     mesh_data_xy = (mesh_data_xy - mesh_data.mean()) / mesh_data.std()
     mesh_data = (mesh_data - mesh_data.mean()) / mesh_data.std()
@@ -642,6 +644,7 @@ def create_mesh(data_dict):
     data_dict['mesh_std'] = mesh_data.std()
     data_dict['mesh_max'] = mesh_data.max()
     data_dict['mesh_min'] = mesh_data.min()
+    data_dict['indices'] = mesh_data
 
     mesh_data_hr = (mesh_data_hr - mesh_data.mean()) / mesh_data.std()
     mesh_data_xy = (mesh_data_xy - mesh_data.mean()) / mesh_data.std()
@@ -849,3 +852,15 @@ class CurveDataset(Dataset):
         return len(self.data_curves)
     def __getitem__(self, idx):
         return self.data_curves[idx], self.data_coordinates[idx], self.collo_coordinates[idx]
+#
+# class CurveDataset(Dataset):
+#     def __init__(self, data_curves, data_coordinates, collo_coordinates, data_indices):
+#         self.data_curves = data_curves
+#         self.data_coordinates = data_coordinates
+#         self.collo_coordinates = collo_coordinates
+#         self.data_indices = data_indices
+#
+#     def __len__(self):
+#         return len(self.data_curves)
+#     def __getitem__(self, idx):
+#         return self.data_curves[idx], self.data_coordinates[idx], self.collo_coordinates[idx], idx
