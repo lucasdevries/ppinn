@@ -6,7 +6,6 @@ from torchsummary import summary
 from siren_pytorch import Siren
 class MLP(nn.Module):
     def __init__(self,
-                 shape_in,
                  aif,
                  n_layers,
                  n_units,
@@ -15,7 +14,6 @@ class MLP(nn.Module):
                  bn=False,
                  act='tanh'):
         super(MLP, self).__init__()
-        self.shape_in = shape_in
         self.aif = aif
         self.n_layers = n_layers
         self.n_units = n_units

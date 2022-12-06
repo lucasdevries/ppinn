@@ -6,6 +6,7 @@ import os
 from einops.einops import repeat, rearrange
 import pandas as pd
 import torch
+import torch.nn.functional as F
 def load_nlr_results(cbv_ml=5, sd=2, undersample=False):
     if not undersample:
 
@@ -1120,4 +1121,29 @@ def plot_curves_at_epoch_amc_st(data_dict, data_curves, device, forward_NNs, ep,
         plt.savefig(os.path.join(wandb.run.dir, 'curves',f'aif_case_{case}_sl{slice}_ep_{ep}_est.png'), dpi=70, bbox_inches='tight')
     else:
         plt.savefig(os.path.join(wandb.run.dir, 'curves',f'aif_case_{case}_sl{slice}_ep_{ep}_data.png'), dpi=70, bbox_inches='tight')
+    plt.close()
+
+def plot_tissue_msu(data_coordinates, data_curves, model, case, original_data_indices, slice, timepoints):
+    t = data_coordinates[..., :1]
+    xy = data_coordinates[..., 1:]
+
+    with torch.no_grad():
+        splits_t, splits_xy = torch.tensor_split(t, 5), torch.tensor_split(xy, 5)
+        c_tissue = []
+        for ts, xys in zip(splits_t, splits_xy):
+            c_tissue.append(model(ts.to('cuda'), xys.to('cuda')))
+
+    c_tissue = torch.concat(c_tissue).cpu()
+    loss_tissue = F.mse_loss(data_curves, c_tissue, reduction='none')
+    # c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=30)
+    loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
+    loss_tissue = torch.mean(loss_tissue, dim=1)
+
+    result = torch.zeros([512, 512, 1])
+    result[original_data_indices] = loss_tissue.cpu()
+    os.makedirs(os.path.join(wandb.run.dir, 'curves'), exist_ok=True)
+
+    plt.imshow(result, vmin=0, vmax=0.001)
+    plt.savefig(os.path.join(wandb.run.dir, 'curves', f'mse_case_{case}_sl{slice}_0_data.png'),
+                dpi=70, bbox_inches='tight')
     plt.close()

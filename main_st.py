@@ -98,6 +98,7 @@ def train_amc(config):
 
         scan_dimensions = data_dict['curves'].shape[:-1]
         slices = scan_dimensions[0]
+
         cbf_results = np.zeros([*scan_dimensions], dtype=np.float32)
         cbv_results = np.zeros([*scan_dimensions], dtype=np.float32)
         mtt_results = np.zeros([*scan_dimensions], dtype=np.float32)

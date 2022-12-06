@@ -13,7 +13,7 @@ import wandb
 from utils.data_utils import CurveDataset
 import pickle
 from utils.val_utils import load_nlr_results, plot_curves_at_epoch_amc_st
-from utils.val_utils import load_nlr_results, plot_curves_at_epoch, visualize_amc
+from utils.val_utils import load_nlr_results, plot_curves_at_epoch, visualize_amc, plot_tissue_msu
 from utils.val_utils import log_software_results, plot_results, drop_edges, drop_unphysical, drop_unphysical_amc, visualize_amc_sygno
 from siren_pytorch import SirenNet
 from einops.einops import rearrange, repeat
@@ -75,50 +75,65 @@ class PPINN_amc(nn.Module):
         self.batch_size = config.batch_size
         self.data_coordinates_xy = None
 
-        if self.config.siren:
-            print('using SirenNets')
-            self.NN_tissue = MLP_siren(
-                            dim_in=3,  # input dimension, ex. 2d coor
-                            dim_hidden=n_units,  # hidden dimension
-                            dim_out=1,  # output dimension, ex. rgb value
-                            num_layers=n_layers,  # number of layers
-                            final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-                            w0_initial=self.config.siren_w0
-                            # different signals may require different omega_0 in the first layer - this is a hyperparameter
-                        )
-            # self.NN_ode = MLP_ODE_siren(
-            #                         dim_in=2,  # input dimension, ex. 2d coor
-            #                         dim_hidden=n_units,  # hidden dimension
-            #                         dim_out=3,  # output dimension, ex. rgb value
-            #                         num_layers=n_layers,  # number of layers
-            #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-            #                         w0_initial=self.config.siren_w0
-            #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
-            #                     )
-        else:
-            print('using MLPs')
-            self.NN_tissue = MLP(
-                self.shape_in,
-                False,
-                n_layers,
-                n_units,
-                n_inputs=3,
-                neurons_out=1,
-                bn=bn,
-                act='tanh'
-            )
-
-        self.NN_ode = MLP_ODE(
-            4,
-            160,
-            n_inputs=2,
-            neurons_out=3,
+        # if self.config.siren:
+        #     print('using SirenNets')
+        #     self.NN_tissue = MLP_siren(
+        #                     dim_in=3,  # input dimension, ex. 2d coor
+        #                     dim_hidden=n_units,  # hidden dimension
+        #                     dim_out=1,  # output dimension, ex. rgb value
+        #                     num_layers=n_layers,  # number of layers
+        #                     final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+        #                     w0_initial=self.config.siren_w0
+        #                     # different signals may require different omega_0 in the first layer - this is a hyperparameter
+        #                 )
+        #     # self.NN_ode = MLP_ODE_siren(
+        #     #                         dim_in=2,  # input dimension, ex. 2d coor
+        #     #                         dim_hidden=n_units,  # hidden dimension
+        #     #                         dim_out=3,  # output dimension, ex. rgb value
+        #     #                         num_layers=n_layers,  # number of layers
+        #     #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+        #     #                         w0_initial=self.config.siren_w0
+        #     #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
+        #     #                     )
+        # else:
+        print('using MLPs')
+        self.NN_tissue = MLP(
+            False,
+            n_layers,
+            n_units,
+            n_inputs=3,
+            neurons_out=1,
             bn=bn,
             act='tanh'
         )
+        # self.NN_tissue = MLP_siren(
+        #                         dim_in=3,  # input dimension, ex. 2d coor
+        #                         dim_hidden=16,  # hidden dimension
+        #                         dim_out=1,  # output dimension, ex. rgb value
+        #                         num_layers=3,  # number of layers
+        #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+        #                         w0_initial=self.config.siren_w0
+        #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
+        #                     )
+        # self.NN_ode = MLP_ODE(
+        #     n_layers,
+        #     n_units,
+        #     n_inputs=2,
+        #     neurons_out=3,
+        #     bn=bn,
+        #     act='tanh'
+        # )
+        self.NN_ode = MLP_ODE_siren(
+                                        dim_in=2,  # input dimension, ex. 2d coor
+                                        dim_hidden=16,  # hidden dimension
+                                        dim_out=3,  # output dimension, ex. rgb value
+                                        num_layers=3,  # number of layers
+                                        final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+                                        w0_initial=self.config.siren_w0
+                                        # different signals may require different omega_0 in the first layer - this is a hyperparameter
+                                    )
 
         self.NN_aif = MLP(
-            self.shape_in,
             True,
             n_layers,
             n_units,
@@ -147,8 +162,7 @@ class PPINN_amc(nn.Module):
     def forward_complete(self, aif_time, txy):
         t = txy[...,:1]
         xy = txy[...,1:]
-        # t = t.unsqueeze(-1)
-        steps = t.shape[0]
+        # t = t.unsqueeze(-1)        steps = t.shape[0]
         # Get NN output: a tissue curve for each voxel
         c_tissue = self.NN_tissue(t, xy)
         c_aif = self.NN_aif(aif_time, xy)
@@ -168,12 +182,41 @@ class PPINN_amc(nn.Module):
             mtt = 24*params[..., 1:2]
             delay = 3*params[..., 2:]
 
-        c_aif_a = self.NN_aif(t - delay / self.std_t, xy)
+        c_aif_a = self.NN_aif(t - delay / self.std_t, xy) # 128
         c_aif_b = self.NN_aif(t - delay / self.std_t - mtt / self.std_t, xy)
 
-        residual = c_tissue_dt.squeeze() - cbf.squeeze() * (c_aif_a - c_aif_b).squeeze()
+        residual = c_tissue_dt - cbf * (c_aif_a - c_aif_b).unsqueeze(-1)
         return c_aif, c_tissue, residual
 
+    def forward_complete_check(self, aif_time, txy):
+        t = txy[...,:1]
+        t.requires_grad = True
+        xy = txy[...,1:]
+        # t = t.unsqueeze(-1)
+        steps = t.shape[0]
+        # Get NN output: a tissue curve for each voxel
+        c_tissue = self.NN_tissue(t, xy)
+        c_aif = self.NN_aif(aif_time, xy)
+        # Get time-derivative of tissue curve
+        c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
+        # Get ODE params
+        # if self.delay_type == 'learned':
+        #     cbf, mtt, delay = self.get_ode_params()
+        # elif self.delay_type == 'fixed':
+        #     cbf, mtt, _ = self.get_ode_params()
+        #     delay = self.get_delay()
+        #     delay.requires_grad = False
+        # else:
+        #     raise NotImplementedError('Delay type not implemented...')
+
+        # Get AIF NN output:
+        # t = t.view(1, 1, 1, 1, steps, 1)
+        # t = t.expand(*self.shape_in, steps, 1)
+        t = t.detach()
+        t.requires_grad = False
+        # delay = delay.expand(*self.shape_in, steps, 1)
+        params = self.NN_ode(xy)
+        print('ode')
     def set_loss_weights(self, loss_weights):
         loss_weights = torch.tensor(loss_weights)
         self.lw_data, self.lw_res, self.lw_bc = loss_weights
@@ -202,13 +245,18 @@ class PPINN_amc(nn.Module):
         # ones[self.original_data_indices] = 0
 
         params = self.NN_ode(self.data_coordinates_xy)
-        result = torch.zeros([512, 512, 3])
-        result[self.original_data_indices] = params.cpu()
 
-        self.flow_cbf = result[..., :1]
-        self.flow_mtt = result[..., 1:2]
-        self.flow_t_delay = result[..., 2:]
+        result_cbf = torch.zeros([512, 512])
+        result_mtt = torch.zeros([512, 512])
+        result_delay = torch.zeros([512, 512])
 
+        result_cbf[self.original_data_indices] = params[...,0].cpu()
+        result_mtt[self.original_data_indices] = params[...,1].cpu()
+        result_delay[self.original_data_indices] = params[...,2].cpu()
+
+        self.flow_cbf = result_cbf.unsqueeze(-1)
+        self.flow_mtt = result_mtt.unsqueeze(-1)
+        self.flow_t_delay = result_delay.unsqueeze(-1)
 
         if self.log_domain:
             return [torch.exp(self.flow_cbf), 24 * torch.exp(self.flow_mtt), 3 * torch.exp(self.flow_t_delay)]
@@ -249,57 +297,39 @@ class PPINN_amc(nn.Module):
 
         data_time = data_dict['time'][slice]
         data_aif = data_dict['aif']
-        data_curves = data_dict['curves'][slice:slice+1]
-        data_curves = data_curves[0][self.original_data_indices]
-        data_coordinates = data_dict['coordinates'][slice:slice+1]
-        scan_shape = data_coordinates[0].shape[:-1]
-        data_coordinates = data_coordinates[0][self.original_data_indices]
+        data_curves = data_dict['curves'][slice]
+        data_curves = data_curves[self.original_data_indices]
+        data_coordinates = data_dict['coordinates'][slice]
+        data_coordinates = data_coordinates[self.original_data_indices]
+        timepoints = len(data_dict['aif'])
+        # data_indices = rearrange(data_dict['indices'][slice], 't dim1 dim2 vals -> dim1 dim2 vals t')[self.original_data_indices]
+        # data_indices = rearrange(data_indices, ' dim1 vals t -> dim1 t vals')
 
-        data_indices = rearrange(data_dict['indices'][slice], 't dim1 dim2 vals -> dim1 dim2 vals t')[self.original_data_indices]
-        data_indices = rearrange(data_indices, ' dim1 vals t -> dim1 t vals')
-
-        self.data_coordinates_xy = data_dict['coordinates_xy_only'][0,0][self.original_data_indices].to(self.device)
+        self.data_coordinates_xy = data_dict['coordinates_xy_only'][self.original_data_indices].to(self.device)
         # self.data_coordinates_xy = data_dict['coordinates_xy_only']
 
         data_boundary = data_dict['bound']
 
+        # derivative_coordinates = torch.zeros((timepoints, 3)).to(self.device)
+        # derivative_coordinates[...,:1] = data_coordinates[2000,:,:1]
+        # derivative_coordinates[...,1:2] = data_coordinates[2000,0,1:2].repeat(timepoints,1)
+        # derivative_coordinates[...,2:3] = data_coordinates[2000,0,2:3].repeat(timepoints,1)
 
-        # collocation_txys = torch.zeros(data_coordinates.shape)
-        # collocation_txys[..., 1:] = data_coordinates[..., 1:]
-        collocation_txys = data_coordinates.clone()
-        data_curves = rearrange(data_curves, 'dum1 (t val)-> (dum1  t ) val', val=1)
-        data_coordinates = rearrange(data_coordinates, 'dum1 t val-> (dum1 t ) val')
-        collocation_coordinates = rearrange(collocation_txys, 'dum1 t val -> (dum1  t ) val')
+        collocation_txys = torch.zeros(data_coordinates.shape)
+        collocation_txys[..., 1:] = data_coordinates[..., 1:]
+        # collocation_txys = data_coordinates.clone()
+        data_curves = rearrange(data_curves, 'dum1 (t val)-> (dum1  t) val', val=1)
+        data_coordinates = rearrange(data_coordinates, 'dum1 t val-> (dum1 t) val')
+        collocation_coordinates = rearrange(collocation_txys, 'dum1 t val -> (dum1 t) val')
         # data_indices = rearrange(data_indices, 'dum1 t val-> (dum1 t ) val')
 
-        t = data_coordinates[..., :1]
-        xy = data_coordinates[..., 1:]
-
-        with torch.no_grad():
-            splits_t, splits_xy = torch.tensor_split(t, 5), torch.tensor_split(xy, 5)
-            c_tissue = []
-            for ts, xys in zip(splits_t, splits_xy):
-                c_tissue.append(self.NN_tissue(ts.to(self.device), xys.to(self.device)))
-
-        c_tissue = torch.concat(c_tissue).cpu()
-        loss_tissue = F.mse_loss(data_curves, c_tissue, reduction='none')
-        # c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=30)
-        loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=30)
-        loss_tissue = torch.mean(loss_tissue, dim=1)
-
-        result = torch.zeros([512, 512, 1])
-        result[self.original_data_indices] = loss_tissue.cpu()
-        os.makedirs(os.path.join(wandb.run.dir, 'curves'), exist_ok=True)
-
-        plt.imshow(result, vmin=0, vmax=0.001)
-        plt.savefig(os.path.join(wandb.run.dir, 'curves', f'mse_case_{case}_sl{slice}_0_data.png'),
-                    dpi=70, bbox_inches='tight')
-        plt.close()
+        plot_tissue_msu(data_coordinates, data_curves, self.NN_tissue, case, self.original_data_indices, slice, timepoints)
 
         cbf = self.get_cbf(seconds=False).squeeze()
         mtt = self.get_mtt(seconds=True).squeeze()
         mtt_min = self.get_mtt(seconds=False).squeeze()
         delay = self.get_delay(seconds=True).squeeze()
+
         cbv = cbf * mtt_min
         tmax = delay + 0.5*mtt
 
@@ -314,19 +344,13 @@ class PPINN_amc(nn.Module):
         for key in result_dict.keys():
             result_dict[key] = result_dict[key].cpu().detach().numpy()
             result_dict[key] *= mask_data
+
         visualize_amc(case, slice, result_dict, data_dict)
 
         for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
-            # collo_coords = torch.FloatTensor(*collocation_coordinates.shape[:-1]).uniform_(
-            #     data_dict['coll_points_min'],
-            #     data_dict['coll_points_max'])
-            #
-            # collocation_coordinates = rearrange(collocation_txys, 'dum1 t val -> (dum1  t ) val')
-
             collocation_coordinates[:, 0] = torch.FloatTensor(*collocation_coordinates.shape[:-1]).uniform_(
-                data_dict['coll_points_min'],
-                data_dict['coll_points_max'])
-            # curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
+                 torch.min(data_time), torch.max(data_time)
+            )
             curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
             dataloader = DataLoader(curve_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
@@ -372,6 +396,8 @@ class PPINN_amc(nn.Module):
                     wandb.log(metrics)
 
                 iter+=1
+
+            # self.forward_complete_check(batch_time, derivative_coordinates)
             self.scheduler.step()
 
             # TODO check mse for tissue curves
@@ -385,24 +411,27 @@ class PPINN_amc(nn.Module):
                     c_tissue.append(self.NN_tissue(ts.to(self.device), xys.to(self.device)))
             c_tissue = torch.concat(c_tissue).cpu()
             loss_tissue = F.mse_loss(data_curves, c_tissue, reduction='none')
-            c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=30)
-            loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=30)
+            c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
+            loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
             loss_tissue = torch.mean(loss_tissue, dim=1)
+
             result = torch.zeros([512,512,1])
             result[self.original_data_indices] = loss_tissue.cpu()
 
-
-            result_tissue = torch.zeros([512,512,30,1])
+            result_tissue = torch.zeros([512,512,timepoints,1])
             result_tissue[self.original_data_indices] = c_tissue.cpu()
 
             plt.imshow(result, vmin=0, vmax=0.001)
             plt.savefig(os.path.join(wandb.run.dir, 'curves', f'mse_case_{case}_sl{slice}_ep{ep}_data.png'),
                         dpi=70, bbox_inches='tight')
             plt.close()
-            curves = rearrange(data_curves.cpu(), '(dum1  t ) val -> dum1 (t val)',t=30, val=1)
-            gt_tissue = torch.zeros([512,512,30,1])
+
+
+            curves = rearrange(data_curves.cpu(), '(dum1  t ) val -> dum1 (t val)',t=timepoints, val=1)
+            gt_tissue = torch.zeros([512,512,timepoints,1])
             gt_tissue[self.original_data_indices] = curves.unsqueeze(-1).cpu()
-            time = [x for x in range(30)]
+            time = [x for x in range(timepoints)]
+
             for i in [250, 260,270,290]:
                 plt.scatter(time, gt_tissue[i,i])
                 plt.plot(time, result_tissue[i,i])
@@ -412,8 +441,8 @@ class PPINN_amc(nn.Module):
                 plt.close()
 
             if ep%1==0:
-                plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=30).cpu().detach().numpy()
-                curves_to_plt = np.zeros([*self.original_data_shape, 30])
+                plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=timepoints).cpu().detach().numpy()
+                curves_to_plt = np.zeros([*self.original_data_shape, timepoints])
                 curves_to_plt[self.original_data_indices] = plot_curves
 
                 plot_curves_at_epoch_amc_st(data_dict, curves_to_plt, self.device, self.forward_NNs, ep, case, slice,
@@ -484,8 +513,7 @@ class PPINN_amc(nn.Module):
                  batch_boundary,
                  batch_collo
                 ):
-        # self.train()
-        # self.optimizer.zero_grad()
+
         batch_coordinates.requires_grad = True
         batch_collo.requires_grad = True
 
@@ -511,12 +539,11 @@ class PPINN_amc(nn.Module):
             raise ValueError('Loss is nan during training...')
 
         if loss_aif < 0.0015 and not self.aif_training_off:
-                # if self.min_aif_loss < 0.0015:
             for param in self.NN_aif.parameters():
                 param.requires_grad = False
                 param.grad = None
             self.aif_training_off = True
-
+        #
         # if self.epoch > 5 and not self.tissue_training_off:
         #     for param in self.NN_tissue.parameters():
         #         param.requires_grad = False
@@ -557,7 +584,6 @@ class PPINN_amc(nn.Module):
         # solution loss
         loss_aif = F.mse_loss(aif, c_aif)
         loss_tissue = F.mse_loss(curves, c_tissue)
-        # TODO maybe implement derivative loss here
         return loss_aif, loss_tissue
 
     def __loss_interpolation(self, aif, curves, output):

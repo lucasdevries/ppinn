@@ -67,7 +67,6 @@ class PPINN(nn.Module):
         self.batch_size = config.batch_size
         self.data_coordinates_xy = None
         self.NN_aif = MLP(
-            self.shape_in,
             True,
             n_layers,
             n_units,
@@ -76,37 +75,36 @@ class PPINN(nn.Module):
             bn=bn,
             act='tanh'
         )
-        if self.config.siren:
-            print('using SirenNets')
-            self.NN_tissue = MLP_siren(
-                            dim_in=3,  # input dimension, ex. 2d coor
-                            dim_hidden=n_units,  # hidden dimension
-                            dim_out=1,  # output dimension, ex. rgb value
-                            num_layers=n_layers,  # number of layers
-                            final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-                            w0_initial=self.config.siren_w0
-                            # different signals may require different omega_0 in the first layer - this is a hyperparameter
-                        )
-            # self.NN_ode = MLP_ODE_siren(
-            #                         dim_in=2,  # input dimension, ex. 2d coor
-            #                         dim_hidden=16,  # hidden dimension
-            #                         dim_out=3,  # output dimension, ex. rgb value
-            #                         num_layers=n_layers,  # number of layers
-            #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-            #                         w0_initial=self.config.siren_w0
-            #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
-            #                     )
-        else:
-            self.NN_tissue = MLP(
-                self.shape_in,
-                False,
-                n_layers,
-                n_units,
-                n_inputs=3,
-                neurons_out=1,
-                bn=bn,
-                act='tanh'
-            )
+        # if self.config.siren:
+        #     print('using SirenNets')
+        #     self.NN_tissue = MLP_siren(
+        #                     dim_in=3,  # input dimension, ex. 2d coor
+        #                     dim_hidden=n_units,  # hidden dimension
+        #                     dim_out=1,  # output dimension, ex. rgb value
+        #                     num_layers=n_layers,  # number of layers
+        #                     final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+        #                     w0_initial=self.config.siren_w0
+        #                     # different signals may require different omega_0 in the first layer - this is a hyperparameter
+        #                 )
+        #     # self.NN_ode = MLP_ODE_siren(
+        #     #                         dim_in=2,  # input dimension, ex. 2d coor
+        #     #                         dim_hidden=16,  # hidden dimension
+        #     #                         dim_out=3,  # output dimension, ex. rgb value
+        #     #                         num_layers=n_layers,  # number of layers
+        #     #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+        #     #                         w0_initial=self.config.siren_w0
+        #     #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
+        #     #                     )
+        # else:
+        self.NN_tissue = MLP(
+            False,
+            n_layers,
+            n_units,
+            n_inputs=3,
+            neurons_out=1,
+            bn=bn,
+            act='tanh'
+        )
 
         self.NN_ode = MLP_ODE(
             n_layers,
@@ -143,7 +141,7 @@ class PPINN(nn.Module):
         t = txy[...,:1]
         xy = txy[...,1:]
         # t = t.unsqueeze(-1)
-        steps = t.shape[0]
+        # steps = t.shape[0]
         # Get NN output: a tissue curve for each voxel
         c_tissue = self.NN_tissue(t, xy)
         c_aif = self.NN_aif(aif_time, xy)
@@ -162,8 +160,8 @@ class PPINN(nn.Module):
             cbf = params[..., :1]
             mtt = 24*params[..., 1:2]
             delay = 3*params[..., 2:]
-        c_aif_a = self.NN_aif(t - delay / self.std_t, xy)
-        c_aif_b = self.NN_aif(t - delay / self.std_t - mtt / self.std_t, xy)
+        c_aif_a = self.NN_aif(t - delay / self.std_t, xy) #128
+        c_aif_b = self.NN_aif(t - delay / self.std_t - mtt / self.std_t, xy) #128
 
         residual = c_tissue_dt - cbf * (c_aif_a - c_aif_b).unsqueeze(-1)
         # cbf, mtt, delay = self.get_ode_params()
@@ -172,6 +170,7 @@ class PPINN(nn.Module):
 
     def forward_complete_check(self, aif_time, txy):
         t = txy[...,:1]
+        t.requires_grad = True
         xy = txy[...,1:]
         # t = t.unsqueeze(-1)
         steps = t.shape[0]
@@ -290,6 +289,7 @@ class PPINN(nn.Module):
         self.data_coordinates_xy = data_dict['coordinates_xy_only'].to(self.device)
 
         timepoints = len(data_dict['aif'])
+
         collocation_txys = torch.zeros((1,1, 224, 224, timepoints, 3)).to(self.device)
         collocation_txys[...,1:] = data_coordinates[...,1:]
 
@@ -299,9 +299,9 @@ class PPINN(nn.Module):
         derivative_coordinates[...,2:3] = data_coordinates[...,:1,:1,:1,2:3].repeat(1,1,1,1,timepoints,1)
         derivative_coordinates = rearrange(derivative_coordinates, 'dum1 dum2 x y t val-> (dum1 dum2 x y t ) val')
 
-        data_curves = rearrange(data_curves, 'dum1 dum2 x y (t val)-> (dum1 dum2 x y t ) val', val=1)
-        data_coordinates = rearrange(data_coordinates, 'dum1 dum2 x y t val-> (dum1 dum2 x y t ) val')
-        collocation_coordinates = rearrange(collocation_txys, 'dum1 dum2 x y t val -> (dum1 dum2 x y t ) val')
+        data_curves = rearrange(data_curves, 'dum1 dum2 x y (t val)-> (dum1 dum2 x y t) val', val=1)
+        data_coordinates = rearrange(data_coordinates, 'dum1 dum2 x y t val-> (dum1 dum2 x y t) val')
+        collocation_coordinates = rearrange(collocation_txys, 'dum1 dum2 x y t val -> (dum1 dum2 x y t) val')
 
         for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
             collocation_coordinates[:, 0] = torch.FloatTensor(*collocation_coordinates.shape[:-1]).uniform_(
@@ -330,6 +330,7 @@ class PPINN(nn.Module):
                 epoch_tissue_loss.update(loss_tissue.item())
                 epoch_residual_loss.update(loss_residual.item())
 
+            self.forward_complete_check(data_time,derivative_coordinates)
             self.scheduler.step()
             self.ema.update()
             if ep == epochs:
@@ -371,8 +372,7 @@ class PPINN(nn.Module):
                  batch_curves,
                  batch_boundary,
                  batch_collo):
-        # self.train()
-        # self.optimizer.zero_grad()
+
         batch_coordinates.requires_grad = True
         batch_collo.requires_grad = True
 
@@ -471,7 +471,6 @@ class PPINN(nn.Module):
         # solution loss
         loss_aif = F.mse_loss(aif, c_aif)
         loss_tissue = F.mse_loss(curves, c_tissue)
-        # TODO maybe implement derivative loss here
         return loss_aif, loss_tissue
 
     def __loss_interpolation(self, aif, curves, output):

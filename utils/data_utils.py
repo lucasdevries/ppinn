@@ -571,8 +571,8 @@ def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
 
 
     # create meshes
-    data_dict = get_coll_points(data_dict)
     data_dict = normalize_data(data_dict)
+    data_dict = get_coll_points(data_dict)
     data_dict['time'] = np.tile(
         data_dict['time'][..., np.newaxis, np.newaxis, np.newaxis],
         (1, 512, 512, 1),
@@ -611,18 +611,20 @@ def create_mesh_amc(data_dict):
 
     data_dict['indices'] = mesh_data
 
-    mesh_data_hr = (mesh_data_hr - mesh_data.mean()) / mesh_data.std()
-    mesh_data_xy = (mesh_data_xy - mesh_data.mean()) / mesh_data.std()
-    mesh_data = (mesh_data - mesh_data.mean()) / mesh_data.std()
+    mesh_data_hr = (mesh_data_hr - data_dict['mesh_mean']) / data_dict['mesh_std']
+    mesh_data_xy = (mesh_data_xy - data_dict['mesh_mean']) / data_dict['mesh_std']
+    mesh_data = (mesh_data - data_dict['mesh_mean']) / data_dict['mesh_std']
 
     data_dict['coordinates_highres'] = np.concatenate([data_dict['time_inference_highres'], mesh_data_hr], axis=3)
 
     data_dict['coordinates'] = np.concatenate([data_dict['time'], mesh_data], axis=4)
-    data_dict['coordinates_xy_only'] = mesh_data_xy[np.newaxis, np.newaxis, ...]
+    data_dict['coordinates_xy_only'] = mesh_data_xy
+
     data_dict['coordinates'] = rearrange(data_dict['coordinates'], 'dim1 t x y vals -> dim1 x y t vals')
     data_dict['coordinates_highres'] = rearrange(data_dict['coordinates_highres'],'t x y vals -> x y t vals')
 
     return data_dict
+
 def create_mesh(data_dict):
     mesh_x, mesh_y = np.meshgrid(
         np.linspace(0, data_dict['time'].shape[1] - 1, num=data_dict['time'].shape[1]),
