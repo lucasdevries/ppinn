@@ -106,14 +106,23 @@ class PPINN(nn.Module):
             act='tanh'
         )
 
-        self.NN_ode = MLP_ODE(
-            n_layers,
-            n_units,
-            n_inputs=2,
-            neurons_out=3,
-            bn=bn,
-            act='tanh'
-        )
+        # self.NN_ode = MLP_ODE(
+        #     n_layers,
+        #     n_units,
+        #     n_inputs=2,
+        #     neurons_out=3,
+        #     bn=bn,
+        #     act='tanh'
+        # )
+        self.NN_ode = MLP_ODE_siren(
+                                        dim_in=2,  # input dimension, ex. 2d coor
+                                        dim_hidden=16,  # hidden dimension
+                                        dim_out=3,  # output dimension, ex. rgb value
+                                        num_layers=3,  # number of layers
+                                        final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+                                        w0_initial=self.config.siren_w0
+                                        # different signals may require different omega_0 in the first layer - this is a hyperparameter
+                                    )
 
         self.ema = EMA(
             self.NN_ode,
