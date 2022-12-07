@@ -106,15 +106,7 @@ class PPINN_amc(nn.Module):
             bn=bn,
             act='tanh'
         )
-        # self.NN_tissue = MLP_siren(
-        #                         dim_in=3,  # input dimension, ex. 2d coor
-        #                         dim_hidden=16,  # hidden dimension
-        #                         dim_out=1,  # output dimension, ex. rgb value
-        #                         num_layers=3,  # number of layers
-        #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-        #                         w0_initial=self.config.siren_w0
-        #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
-        #                     )
+
         # self.NN_ode = MLP_ODE(
         #     n_layers,
         #     n_units,
