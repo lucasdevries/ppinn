@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import logging
 import os
+import random
 import wandb
 from utils.data_utils import CurveDataset
 import pickle
@@ -40,7 +41,7 @@ class PPINN(nn.Module):
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
         self.optimizer = None
         self.scheduler = None
-        self.milestones = [self.config.milestone, self.config.milestone+20]
+        self.milestones = [self.config.milestone, 2*self.config.milestone]
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
@@ -105,32 +106,53 @@ class PPINN(nn.Module):
             bn=bn,
             act='tanh'
         )
+        # self.NN_tissue = MLP_siren(
+        #                 dim_in=3,  # input dimension, ex. 2d coor
+        #                 dim_hidden=n_units,  # hidden dimension
+        #                 dim_out=1,  # output dimension, ex. rgb value
+        #                 num_layers=3,  # number of layers
+        #                 final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+        #                 w0_initial=self.config.siren_w0
+        #                 # different signals may require different omega_0 in the first layer - this is a hyperparameter
+        #             )
+        if config.ode_net_type == 'MLP_tanh':
+            self.NN_ode = MLP_ODE(
+                n_layers,
+                n_units,
+                n_inputs=2,
+                neurons_out=3,
+                bn=bn,
+                act='tanh'
+            )
+        elif config.ode_net_type == 'MLP_relu':
+            self.NN_ode = MLP_ODE(
+                n_layers,
+                n_units,
+                n_inputs=2,
+                neurons_out=3,
+                bn=bn,
+                act='relu'
+            )
+        elif config.ode_net_type == 'Siren':
+            self.NN_ode = MLP_ODE_siren(
+                                            dim_in=2,  # input dimension, ex. 2d coor
+                                            dim_hidden=n_units,  # hidden dimension
+                                            dim_out=3,  # output dimension, ex. rgb value
+                                            num_layers=n_layers+1,  # number of layers
+                                            final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+                                            w0_initial=self.config.siren_w0
+                                            # different signals may require different omega_0 in the first layer - this is a hyperparameter
+                                        )
+        else:
+            raise NotImplementedError('Help, not implemented!')
 
-        # self.NN_ode = MLP_ODE(
-        #     n_layers,
-        #     n_units,
-        #     n_inputs=2,
-        #     neurons_out=3,
-        #     bn=bn,
-        #     act='tanh'
+        # self.ema = EMA(
+        #     self.NN_ode,
+        #     beta = 0.9999,
+        #     update_after_step=40,
+        #     update_every=1,
         # )
-        self.NN_ode = MLP_ODE_siren(
-                                        dim_in=2,  # input dimension, ex. 2d coor
-                                        dim_hidden=16,  # hidden dimension
-                                        dim_out=3,  # output dimension, ex. rgb value
-                                        num_layers=3,  # number of layers
-                                        final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-                                        w0_initial=self.config.siren_w0
-                                        # different signals may require different omega_0 in the first layer - this is a hyperparameter
-                                    )
-
-        self.ema = EMA(
-            self.NN_ode,
-            beta = 0.9999,
-            update_after_step=40,
-            update_every=1,
-        )
-        self.ema_on = False
+        # self.ema_on = False
         self.current_iteration = 0
         self.epoch = 1
         self.set_lr(self.config.optimizer, lr)
@@ -143,7 +165,11 @@ class PPINN(nn.Module):
         t = txy[...,:1]
         xy = txy[...,1:]
         c_tissue = self.NN_tissue(t, xy)
+        torch.cuda.synchronize()
+
         c_aif = self.NN_aif(aif_time, xy)
+
+        torch.cuda.synchronize()
         return c_aif, c_tissue
 
     def forward_complete(self, aif_time, txy):
@@ -153,14 +179,22 @@ class PPINN(nn.Module):
         # steps = t.shape[0]
         # Get NN output: a tissue curve for each voxel
         c_tissue = self.NN_tissue(t, xy)
+        torch.cuda.synchronize()
+
         c_aif = self.NN_aif(aif_time, xy)
+        torch.cuda.synchronize()
+
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
+        torch.cuda.synchronize()
+
 
         t = t.detach()
         t.requires_grad = False
         # delay = delay.expand(*self.shape_in, steps, 1)
         params = self.NN_ode(xy)
+        torch.cuda.synchronize()
+
         if self.log_domain:
             cbf = torch.exp(params[..., :1])
             mtt = 24*torch.exp(params[..., 1:2])
@@ -169,12 +203,18 @@ class PPINN(nn.Module):
             cbf = params[..., :1]
             mtt = 24*params[..., 1:2]
             delay = 3*params[..., 2:]
+
         c_aif_a = self.NN_aif(t - delay / self.std_t, xy) #128
+        torch.cuda.synchronize()
+
         c_aif_b = self.NN_aif(t - delay / self.std_t - mtt / self.std_t, xy) #128
+        torch.cuda.synchronize()
+
 
         residual = c_tissue_dt - cbf * (c_aif_a - c_aif_b).unsqueeze(-1)
         # cbf, mtt, delay = self.get_ode_params()
         # print(cbf[0,0,0,0], mtt[0,0,0,0], delay[0,0,0,0])
+        torch.cuda.synchronize()
         return c_aif, c_tissue, residual
 
     def forward_complete_check(self, aif_time, txy):
@@ -242,10 +282,11 @@ class PPINN(nn.Module):
 
     def get_ode_params(self):
         data_coordinates_xy = rearrange(self.data_coordinates_xy, 'dum1 dum2 x y val-> (dum1 dum2 x y) val')
-        if self.ema_on:
-            params = self.ema(data_coordinates_xy)
-        else:
-            params = self.NN_ode(data_coordinates_xy)
+        # if self.ema_on:
+        #     params = self.ema(data_coordinates_xy)
+        # else:
+        #     params = self.NN_ode(data_coordinates_xy)
+        params = self.NN_ode(data_coordinates_xy)
         params = rearrange(params, '(dum1 dum2 x y) val -> dum1 dum2 x y val', dum1=1, dum2=1,
                                         x=224,
                                         y=224)
@@ -283,7 +324,7 @@ class PPINN(nn.Module):
             return constant * flow
         else:
             return constant * flow * 60
-
+    # @profile
     def fit(self,
             data_dict,
             gt,
@@ -292,21 +333,21 @@ class PPINN(nn.Module):
 
         data_time = data_dict['time'].to(self.device)
         data_aif = data_dict['aif'].to(self.device)
-        data_curves = data_dict['curves'].to(self.device)
-        data_boundary = data_dict['bound'].to(self.device)
-        data_coordinates = data_dict['coordinates'].to(self.device)
+        data_curves = data_dict['curves'].numpy()#.to(self.device)
+        data_boundary = data_dict['bound'].numpy()#.to(self.device)
+        data_coordinates = data_dict['coordinates'].numpy()#.to(self.device)
         self.data_coordinates_xy = data_dict['coordinates_xy_only'].to(self.device)
 
         timepoints = len(data_dict['aif'])
 
-        collocation_txys = torch.zeros((1,1, 224, 224, timepoints, 3)).to(self.device)
+        collocation_txys = np.zeros((1,1, 224, 224, timepoints, 3))
         collocation_txys[...,1:] = data_coordinates[...,1:]
-
-        derivative_coordinates = torch.zeros((1, 1, 1, 1, timepoints, 3)).to(self.device)
-        derivative_coordinates[...,:1] = data_coordinates[...,:1,:1,:,:1]
-        derivative_coordinates[...,1:2] = data_coordinates[...,:1,:1,:1,1:2].repeat(1,1,1,1,timepoints,1)
-        derivative_coordinates[...,2:3] = data_coordinates[...,:1,:1,:1,2:3].repeat(1,1,1,1,timepoints,1)
-        derivative_coordinates = rearrange(derivative_coordinates, 'dum1 dum2 x y t val-> (dum1 dum2 x y t ) val')
+        #
+        # derivative_coordinates = torch.zeros((1, 1, 1, 1, timepoints, 3)).to(self.device)
+        # derivative_coordinates[...,:1] = data_coordinates[...,:1,:1,:,:1]
+        # derivative_coordinates[...,1:2] = data_coordinates[...,:1,:1,:1,1:2].repeat(1,1,1,1,timepoints,1)
+        # derivative_coordinates[...,2:3] = data_coordinates[...,:1,:1,:1,2:3].repeat(1,1,1,1,timepoints,1)
+        # derivative_coordinates = rearrange(derivative_coordinates, 'dum1 dum2 x y t val-> (dum1 dum2 x y t ) val')
 
         data_curves = rearrange(data_curves, 'dum1 dum2 x y (t val)-> (dum1 dum2 x y t) val', val=1)
         data_coordinates = rearrange(data_coordinates, 'dum1 dum2 x y t val-> (dum1 dum2 x y t) val')
@@ -316,14 +357,29 @@ class PPINN(nn.Module):
             collocation_coordinates[:, 0] = torch.FloatTensor(*collocation_coordinates.shape[:-1]).uniform_(
                 data_dict['coll_points_min'],
                 data_dict['coll_points_max'])
+
             curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
-            dataloader = DataLoader(curve_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+            dataloader = DataLoader(curve_dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=1)
+
+            integers = np.arange(len(data_curves))
+            np.random.shuffle(integers)
+            splits = np.array_split(integers, int(len(data_curves)/batch_size))
 
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
             epoch_residual_loss = AverageMeter()
 
-            for batch_curves, batch_coordinates, batch_collo in dataloader:
+            # for batch_curves, batch_coordinates, batch_collo in dataloader:
+            #
+            #     batch_curves = batch_curves.to(self.device)
+            #     batch_coordinates = batch_coordinates.to(self.device)
+            #     batch_collo = batch_collo.to(self.device)
+            for split in splits:
+
+                batch_curves = torch.from_numpy(data_curves[split]).float().to(self.device)
+                batch_coordinates = torch.from_numpy(data_coordinates[split]).float().to(self.device)
+                batch_collo = torch.from_numpy(collocation_coordinates[split]).float().to(self.device)
+
                 batch_aif = data_aif
                 batch_time = data_time[:,0,0,:]
                 batch_boundary = data_boundary
@@ -333,17 +389,16 @@ class PPINN(nn.Module):
                                                                      batch_curves,
                                                                      batch_boundary,
                                                                      batch_collo)
-
-
+                torch.cuda.synchronize()
                 epoch_aif_loss.update(loss_aif.item())
                 epoch_tissue_loss.update(loss_tissue.item())
                 epoch_residual_loss.update(loss_residual.item())
 
-            self.forward_complete_check(data_time,derivative_coordinates)
+            # self.forward_complete_check(data_time,derivative_coordinates)
             self.scheduler.step()
-            self.ema.update()
-            if ep == epochs:
-                self.ema_on = True
+            # self.ema.update()
+            # if ep == epochs:
+            #     self.ema_on = True
             if self.config.wandb:
                 metrics = {"aif_loss": epoch_aif_loss.avg,
                            "tissue_loss": epoch_tissue_loss.avg,
@@ -358,10 +413,10 @@ class PPINN(nn.Module):
             if self.epoch % self.config.plot_params_every == 0:
                 try:
                     self.plot_params(0, 0, gt, ep)
-                    self.plot_params_difference(0, 0, gt, ep)
+                    # self.plot_params_difference(0, 0, gt, ep)
                 except:
                     continue
-
+            #
             if self.epoch%20==0:
                 data_curves = rearrange(data_curves, ' (dum1 dum2 x y t ) val-> (t val) dum1 dum2 x y', dum1=1, dum2=1,
                                         x=224,
@@ -373,7 +428,7 @@ class PPINN(nn.Module):
                 # plot_curves_at_epoch_phantom(data_dict, data_curves, self.device, self.forward_NNs, ep, plot_estimates=False)
             self.current_iteration += 1
             self.epoch += 1
-
+    # @profile
     def optimize(self,
                  batch_time,
                  batch_coordinates,
@@ -394,13 +449,21 @@ class PPINN(nn.Module):
         if self.lw_data:
             # compute data loss
             c_aif, c_tissue = self.forward_NNs(batch_time, batch_coordinates)
+            torch.cuda.synchronize()
             loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
+            torch.cuda.synchronize()
+
             loss += self.lw_data * (loss_aif + loss_tissue)
 
         if self.lw_res:
             # compute residual loss
+
             c_aif, c_tissue, residual = self.forward_complete(batch_time, batch_collo)
+            torch.cuda.synchronize()
+
             loss_residual = self.__loss_residual(residual)
+            torch.cuda.synchronize()
+
             loss += self.lw_res * loss_residual
         #     # compute data loss
         if np.isnan(float(loss.item())):
@@ -415,7 +478,7 @@ class PPINN(nn.Module):
         return loss_aif, loss_tissue, loss_residual
 
     def get_results(self, save_results=True, st=False):
-        self.ema_on = True
+        # self.ema_on = True
         cbf = self.get_cbf(seconds=False).squeeze().cpu().detach().numpy()
         mtt = self.get_mtt(seconds=True).squeeze().cpu().detach().numpy()
         mtt_min = self.get_mtt(seconds=False).squeeze().cpu().detach().numpy()

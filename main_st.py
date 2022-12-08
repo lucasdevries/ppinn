@@ -105,7 +105,7 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(slices)[6:]):
+        for slice in tqdm(range(slices)[10:]):
             mask_data = data_dict['mask'][slice]
             valid_voxels = torch.where(mask_data == 1)
             shape_in = torch.Size([1, len(valid_voxels[0]), 1])
@@ -155,7 +155,8 @@ def train_amc(config):
                                                  cbv_results,
                                                  mtt_results,
                                                  delay_results,
-                                                 tmax_results
+                                                 tmax_results,
+                                                 data_dict
                                                 )
 
 def train_isles(config):

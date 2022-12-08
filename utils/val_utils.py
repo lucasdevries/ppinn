@@ -1039,7 +1039,7 @@ def plot_curves_at_epoch_phantom_st(data_dict, batch_time, data_curves, device, 
             'size': 24,
             }
     for i in range(0, 10, 1):
-        if np.min(data_curves[:,0,0, 128,i].cpu().detach().numpy()) < 0:
+        if np.min(data_curves[:,0,0, 128,i]) < 0:
             continue
         plt.figure(figsize=(5, 5))
         # time = data_dict['time'] * data_dict['std_t'] + data_dict['mean_t']
@@ -1047,7 +1047,7 @@ def plot_curves_at_epoch_phantom_st(data_dict, batch_time, data_curves, device, 
         # time_hr = time_hr[::10]
         if plot_estimates:
             plt.plot(batch_time.cpu().detach().numpy(), tac_inf[0,0,128,i,:,0].cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \phi)$')
-        plt.scatter(batch_time.cpu().detach().numpy(), data_curves[:,0,0, 128,i].cpu().detach().numpy(), c='k', label=r'obs. data')
+        plt.scatter(batch_time.cpu().detach().numpy(), data_curves[:,0,0, 128,i], c='k', label=r'obs. data')
         plt.xticks([])
         plt.yticks([])
         plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))

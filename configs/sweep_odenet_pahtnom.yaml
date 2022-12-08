@@ -1,0 +1,28 @@
+program: main_st.py
+method: grid
+parameters:
+  sd:
+    values:
+      - 2
+  cbv_ml:
+    values:
+      - 5
+  epochs:
+    values:
+      - 60
+  lr:
+    values:
+      - 1e-3
+  ode_net_type:
+    values:
+      - 'Siren'
+      - 'MLP_tanh'
+      - 'MLP_relu'
+  siren_w0:
+    values:
+      - 30
+command:
+  - ${env}
+  - python
+  - ${program}
+  - configs\spatiotemporal.json
