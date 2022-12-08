@@ -90,7 +90,7 @@ def train(config):
 
 def train_amc(config):
     cases = os.listdir(r'D:/PPINN_patient_data/AMCCTP/CTP_nii_registered')
-    for case in tqdm(cases):
+    for case in tqdm(cases[:1]):
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_AMC_spatiotemporal(gaussian_filter_type=config.filter_type,
                                              sd=config.sd,
@@ -105,7 +105,7 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(slices)[10:]):
+        for slice in tqdm(range(slices)[10:11]):
             mask_data = data_dict['mask'][slice]
             valid_voxels = torch.where(mask_data == 1)
             shape_in = torch.Size([1, len(valid_voxels[0]), 1])
@@ -145,7 +145,6 @@ def train_amc(config):
             tmax_results[slice, ...] = result_dict['tmax']
 
             visualize_amc(case, slice, result_dict, data_dict)
-            break
             # visualize_amc_sygno(case, slice, sygnovia_results, data_dict)
 
         # save maps as sitks

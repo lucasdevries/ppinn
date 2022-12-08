@@ -288,7 +288,7 @@ class PPINN_amc(nn.Module):
             return constant * flow
         else:
             return constant * flow * 60
-
+    # @profile
     def fit(self,
             slice,
             data_dict,
@@ -298,9 +298,9 @@ class PPINN_amc(nn.Module):
 
         data_time = data_dict['time'][slice]
         data_aif = data_dict['aif']
-        data_curves = data_dict['curves'][slice]
+        data_curves = data_dict['curves'][slice].numpy()
         data_curves = data_curves[self.original_data_indices]
-        data_coordinates = data_dict['coordinates'][slice]
+        data_coordinates = data_dict['coordinates'][slice].numpy()
         data_coordinates = data_coordinates[self.original_data_indices]
         timepoints = len(data_dict['aif'])
         # data_indices = rearrange(data_dict['indices'][slice], 't dim1 dim2 vals -> dim1 dim2 vals t')[self.original_data_indices]
@@ -316,7 +316,7 @@ class PPINN_amc(nn.Module):
         # derivative_coordinates[...,1:2] = data_coordinates[2000,0,1:2].repeat(timepoints,1)
         # derivative_coordinates[...,2:3] = data_coordinates[2000,0,2:3].repeat(timepoints,1)
 
-        collocation_txys = torch.zeros(data_coordinates.shape)
+        collocation_txys = np.zeros(data_coordinates.shape)
         collocation_txys[..., 1:] = data_coordinates[..., 1:]
         # collocation_txys = data_coordinates.clone()
         data_curves = rearrange(data_curves, 'dum1 (t val)-> (dum1  t) val', val=1)
@@ -360,10 +360,21 @@ class PPINN_amc(nn.Module):
             epoch_residual_loss = AverageMeter()
             iter = 0
 
-            for batch_curves, batch_coordinates, batch_collo in dataloader:
-                batch_curves = batch_curves.to(self.device)
-                batch_coordinates = batch_coordinates.to(self.device)
-                batch_collo = batch_collo.to(self.device)
+            integers = np.arange(len(data_curves))
+            np.random.shuffle(integers)
+            splits = np.array_split(integers, int(len(data_curves)/batch_size))
+
+            # for batch_curves, batch_coordinates, batch_collo in dataloader:
+            #
+            #
+            #     batch_curves = batch_curves.to(self.device)
+            #     batch_coordinates = batch_coordinates.to(self.device)
+            #     batch_collo = batch_collo.to(self.device)
+            for split in splits:
+
+                batch_curves = torch.from_numpy(data_curves[split]).float().to(self.device)
+                batch_coordinates = torch.from_numpy(data_coordinates[split]).float().to(self.device)
+                batch_collo = torch.from_numpy(collocation_coordinates[split]).float().to(self.device)
 
                 batch_aif = data_aif.to(self.device)
                 batch_time = data_time[:, 0, 0, :].to(self.device)
@@ -403,8 +414,10 @@ class PPINN_amc(nn.Module):
 
             # TODO check mse for tissue curves
 
-            t = data_coordinates[..., :1]
-            xy = data_coordinates[..., 1:]
+            t = torch.from_numpy(data_coordinates[..., :1]).float()
+            xy = torch.from_numpy(data_coordinates[..., 1:]).float()
+            data_curves = torch.from_numpy(data_curves).float()
+
             with torch.no_grad():
                 splits_t, splits_xy = torch.tensor_split(t, 5), torch.tensor_split(xy, 5)
                 c_tissue = []
@@ -415,7 +428,6 @@ class PPINN_amc(nn.Module):
             c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
             loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
             loss_tissue = torch.mean(loss_tissue, dim=1)
-
             result = torch.zeros([512,512,1])
             result[self.original_data_indices] = loss_tissue.cpu()
 
@@ -433,21 +445,23 @@ class PPINN_amc(nn.Module):
             gt_tissue[self.original_data_indices] = curves.unsqueeze(-1).cpu()
             time = [x for x in range(timepoints)]
 
-            for i in [250, 260,270,290]:
-                plt.scatter(time, gt_tissue[i,i])
-                plt.plot(time, result_tissue[i,i])
-                plt.ylim(0.05, 0.20)
-                plt.savefig(os.path.join(wandb.run.dir, 'curves', f'tac_case_{case}_sl{slice}_{i}_{i}_ep{ep}_data.png'),
-                            dpi=70, bbox_inches='tight')
-                plt.close()
+            # for i in [250, 260,270,290]:
+            #     plt.scatter(time, gt_tissue[i,i])
+            #     plt.plot(time, result_tissue[i,i])
+            #     plt.ylim(0.05, 0.20)
+            #     plt.savefig(os.path.join(wandb.run.dir, 'curves', f'tac_case_{case}_sl{slice}_{i}_{i}_ep{ep}_data.png'),
+            #                 dpi=70, bbox_inches='tight')
+            #     plt.close()
 
-            if ep%1==0:
+            if ep%100==0:
                 plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=timepoints).cpu().detach().numpy()
                 curves_to_plt = np.zeros([*self.original_data_shape, timepoints])
                 curves_to_plt[self.original_data_indices] = plot_curves
 
                 plot_curves_at_epoch_amc_st(data_dict, curves_to_plt, self.device, self.forward_NNs, ep, case, slice,
                                             plot_estimates=True)
+
+            data_curves = data_curves.cpu().detach().numpy()
             # if self.config.wandb:
             #     metrics = {"aif_loss": epoch_aif_loss.avg,
             #                "tissue_loss": epoch_tissue_loss.avg,

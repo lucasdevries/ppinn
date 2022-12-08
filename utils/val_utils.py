@@ -1124,8 +1124,10 @@ def plot_curves_at_epoch_amc_st(data_dict, data_curves, device, forward_NNs, ep,
     plt.close()
 
 def plot_tissue_msu(data_coordinates, data_curves, model, case, original_data_indices, slice, timepoints):
-    t = data_coordinates[..., :1]
-    xy = data_coordinates[..., 1:]
+    data_curves = torch.from_numpy(data_curves).float()
+
+    t = torch.from_numpy(data_coordinates[..., :1]).float()
+    xy = torch.from_numpy(data_coordinates[..., 1:]).float()
 
     with torch.no_grad():
         splits_t, splits_xy = torch.tensor_split(t, 5), torch.tensor_split(xy, 5)
@@ -1138,7 +1140,7 @@ def plot_tissue_msu(data_coordinates, data_curves, model, case, original_data_in
     # c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=30)
     loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
     loss_tissue = torch.mean(loss_tissue, dim=1)
-
+    del data_curves
     result = torch.zeros([512, 512, 1])
     result[original_data_indices] = loss_tissue.cpu()
     os.makedirs(os.path.join(wandb.run.dir, 'curves'), exist_ok=True)

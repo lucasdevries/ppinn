@@ -845,20 +845,20 @@ def np2itk(arr, original_img):
     img.CopyInformation(original_img)
     return img
 
-class CurveDataset(Dataset):
-    def __init__(self, data_curves, data_coordinates, collo_coordinates):
-        self.data_curves = data_curves
-        self.data_coordinates = data_coordinates
-        self.collo_coordinates = collo_coordinates
-    def __len__(self):
-        return len(self.data_curves)
-    def __getitem__(self, idx):
-        curves = torch.from_numpy(self.data_curves[idx]).float()
-        coordinates = torch.from_numpy(self.data_coordinates[idx]).float()
-        collocation = torch.from_numpy(self.collo_coordinates[idx]).float()
-
-        return curves, coordinates, collocation
+# class CurveDataset(Dataset):
+#     def __init__(self, data_curves, data_coordinates, collo_coordinates):
+#         self.data_curves = data_curves
+#         self.data_coordinates = data_coordinates
+#         self.collo_coordinates = collo_coordinates
+#     def __len__(self):
+#         return len(self.data_curves)
+#     def __getitem__(self, idx):
+#         curves = torch.from_numpy(self.data_curves[idx]).float()
+#         coordinates = torch.from_numpy(self.data_coordinates[idx]).float()
+#         collocation = torch.from_numpy(self.collo_coordinates[idx]).float()
 #
+#         return curves, coordinates, collocation
+# #
 # class CurveDataset(Dataset):
 #     def __init__(self, data_curves, data_coordinates, collo_coordinates, data_indices):
 #         self.data_curves = data_curves
@@ -870,3 +870,13 @@ class CurveDataset(Dataset):
 #         return len(self.data_curves)
 #     def __getitem__(self, idx):
 #         return self.data_curves[idx], self.data_coordinates[idx], self.collo_coordinates[idx], idx
+class CurveDataset(Dataset):
+    def __init__(self, data_curves, data_coordinates, collo_coordinates):
+        self.data_curves = data_curves
+        self.data_coordinates = data_coordinates
+        self.collo_coordinates = collo_coordinates
+
+    def __len__(self):
+        return len(self.data_curves)
+    def __getitem__(self, idx):
+        return self.data_curves[idx], self.data_coordinates[idx], self.collo_coordinates[idx]
