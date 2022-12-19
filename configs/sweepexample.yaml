@@ -1,20 +1,17 @@
-program: main.py
+program: main_st.py
 method: grid
 parameters:
-  epochs:
-    values:
-      - 4
-  lr:
-    values:
-      - 1e-2
-      - 1e-3
-      - 0.5e-3
-  log_domain:
+  siren:
     values:
       - true
-      - false
+  hidden_tissue:
+    values:
+      - 32
+  epochs:
+    values:
+      - 300
 command:
   - ${env}
   - python
   - ${program}
-  - configs\config.json
+  - configs\spatiotemporal_amc.json

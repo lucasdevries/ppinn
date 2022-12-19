@@ -150,6 +150,10 @@ class PPINN_amc(nn.Module):
 
     def set_lr(self, lr):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        # self.optimizer = torch.optim.AdamW(self.parameters(), lr=lr)
+        # TODO
+        # print('USING ADAMW dont forget')
+
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                               milestones=self.milestones,
                                                               gamma=0.5)
@@ -260,16 +264,16 @@ class PPINN_amc(nn.Module):
                 self.min_aif_loss = loss_aif.item()
 
             self.scheduler.step()
-            metrics = {f"aif_loss_{slice}": epoch_aif_loss.avg,
-                       f"tissue_loss_{slice}": epoch_tissue_loss.avg,
-                       f"residual_loss_{slice}": epoch_residual_loss.avg,
-                       f"lr_{slice}": self.optimizer.param_groups[0]['lr'],
+            metrics = {f"aif_loss_{case}_{slice}": epoch_aif_loss.avg,
+                       f"tissue_loss_{case}_{slice}": epoch_tissue_loss.avg,
+                       f"residual_loss_{case}_{slice}": epoch_residual_loss.avg,
+                       f"lr_{case}_{slice}": self.optimizer.param_groups[0]['lr'],
                        }
             wandb.log(metrics, step=self.current_iteration)
 
-            if ep%25==0:
-                plot_curves_at_epoch(data_dict, data_curves, self.device, self.forward_NNs, ep, case,slice, plot_estimates=True)
-                # plot_curves_at_epoch(data_dict, data_curves, self.device, self.forward_NNs, ep, case,slice, plot_estimates=False)
+            # if ep%5==0:
+            #     plot_curves_at_epoch(data_dict, data_curves, self.device, self.forward_NNs, ep, case,slice, plot_estimates=True)
+            #     plot_curves_at_epoch(data_dict, data_curves, self.device, self.forward_NNs, ep, case,slice, plot_estimates=False)
 
             self.current_iteration += 1
 

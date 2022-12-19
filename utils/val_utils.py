@@ -845,7 +845,13 @@ def drop_edges(results):
             results[k1][k2] = np.delete(results[k1][k2], skip_rows, axis=0)
             results[k1][k2] = np.delete(results[k1][k2], skip_rows, axis=1)
     return results
-
+def drop_edges_per_method(results):
+    skip_rows = sorted(list(range(-2, 226, 32)) + list(range(-1, 226, 32)) + list(range(0, 226, 32)) + list(range(1, 226, 32)))
+    skip_rows = skip_rows[2:-2]
+    for k2 in ['cbf', 'cbv', 'mtt', 'delay', 'tmax']:
+        results[k2] = np.delete(results[k2], skip_rows, axis=0)
+        results[k2] = np.delete(results[k2], skip_rows, axis=1)
+    return results
 def drop_unphysical(results):
     for k1 in results.keys():
         results[k1]['cbf'] = np.clip(results[k1]['cbf'], a_min=0 , a_max=150)
@@ -854,13 +860,19 @@ def drop_unphysical(results):
         results[k1]['delay'] = np.clip(results[k1]['delay'], a_min=0 , a_max=10)
         results[k1]['tmax'] = np.clip(results[k1]['tmax'], a_min=0 , a_max=20)
     return results
-
+def drop_unphysical_per_method(results):
+    results['cbf'] = np.clip(results['cbf'], a_min=0 , a_max=150)
+    results['cbv'] = np.clip(results['cbv'], a_min=0, a_max=10)
+    results['mtt'] = np.clip(results['mtt'], a_min=0 , a_max=30)
+    results['delay'] = np.clip(results['delay'], a_min=0 , a_max=10)
+    results['tmax'] = np.clip(results['tmax'], a_min=0 , a_max=20)
+    return results
 def drop_unphysical_amc(results):
-    results['cbf'] = np.clip(results['cbf'].cpu().detach().numpy(), a_min=0 , a_max=150)
-    results['cbv'] = np.clip(results['cbv'].cpu().detach().numpy(), a_min=0, a_max=10)
-    results['mtt'] = np.clip(results['mtt'].cpu().detach().numpy(), a_min=0 , a_max=30)
-    results['delay'] = np.clip(results['delay'].cpu().detach().numpy(), a_min=0 , a_max=10)
-    results['tmax'] = np.clip(results['tmax'].cpu().detach().numpy(), a_min=0 , a_max=20)
+    results['cbf'] = np.clip(results['cbf'], a_min=0 , a_max=150)
+    results['cbv'] = np.clip(results['cbv'], a_min=0, a_max=10)
+    results['mtt'] = np.clip(results['mtt'], a_min=0 , a_max=30)
+    results['delay'] = np.clip(results['delay'], a_min=0 , a_max=10)
+    results['tmax'] = np.clip(results['tmax'], a_min=0 , a_max=20)
     return results
 
 def plot_results(results, corrected=False):
@@ -945,25 +957,25 @@ def plot_curves_at_epoch(data_dict, data_curves, device, forward_NNs, ep, case, 
             'weight': 'normal',
             'size': 24,
             }
-    # for i in range(6, 6 * 200 + 50, 50):
-    #     if np.min(data_curves[0, 3000 + i, 0].cpu().detach().numpy()) < 0:
-    #         continue
-    #     plt.figure(figsize=(5, 5))
-    #     time = data_dict['time'][slice] * data_dict['std_t'] + data_dict['mean_t']
-    #     time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
-    #     if plot_estimates:
-    #         plt.plot(time_hr, tac_inf[0,3000+i,0].cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
-    #     plt.scatter(time, data_curves[0, 3000 + i, 0].cpu().detach().numpy(), c='k', label=r'obs. data')
-    #     plt.xticks([])
-    #     plt.yticks([])
-    #     plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
-    #     plt.ylabel('[HU]', fontdict=font)
-    #     plt.xlabel('[s]', fontdict=font)
-    #     if plot_estimates:
-    #         plt.savefig(os.path.join(wandb.run.dir, f'tac_case_{case}_{i}_sl{slice}_ep{ep}_est.png'), dpi=150, bbox_inches='tight')
-    #     else:
-    #         plt.savefig(os.path.join(wandb.run.dir, f'tac_case_{case}_{i}_sl{slice}_ep{ep}_data.png'), dpi=150, bbox_inches='tight')
-    #     plt.close()  #
+    for i in range(6, 6 * 200 + 50, 50):
+        if np.min(data_curves[0, 3000 + i, 0].cpu().detach().numpy()) < 0:
+            continue
+        plt.figure(figsize=(5, 5))
+        time = data_dict['time'][slice] * data_dict['std_t'] + data_dict['mean_t']
+        time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
+        if plot_estimates:
+            plt.plot(time_hr, tac_inf[0,3000+i,0].cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
+        plt.scatter(time, data_curves[0, 3000 + i, 0].cpu().detach().numpy(), c='k', label=r'obs. data')
+        plt.xticks([])
+        plt.yticks([])
+        plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
+        plt.ylabel('[HU]', fontdict=font)
+        plt.xlabel('[s]', fontdict=font)
+        if plot_estimates:
+            plt.savefig(os.path.join(wandb.run.dir, f'tac_case_{case}_{i}_sl{slice}_ep{ep}_est.png'), dpi=150, bbox_inches='tight')
+        else:
+            plt.savefig(os.path.join(wandb.run.dir, f'tac_case_{case}_{i}_sl{slice}_ep{ep}_data.png'), dpi=150, bbox_inches='tight')
+        plt.close()  #
     plt.figure(figsize=(5, 5))
     time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
     time_aif = data_dict['aif_time'] * data_dict['std_t'] + data_dict['mean_t']
@@ -1081,7 +1093,20 @@ def plot_curves_at_epoch_amc_st(data_dict, data_curves, device, forward_NNs, ep,
     time_aif = data_time_inf[0,0,:, :1]
 
     with torch.no_grad():
-        aif_inf, tac_inf = forward_NNs(time_aif, data_time_inf)
+        splits_txy = torch.tensor_split(data_time_inf, 5)
+
+        c_tissue = []
+        for txys in splits_txy:
+            aif_inf, tac_inf = forward_NNs(time_aif, txys)
+            c_tissue.append(tac_inf)
+
+    tac_inf = torch.concat(c_tissue).cpu()
+
+
+    # with torch.no_grad():
+    #     aif_inf, tac_inf = forward_NNs(time_aif, data_time_inf)
+
+
     font = {'family': 'serif',
             'color': 'black',
             'weight': 'normal',

@@ -183,3 +183,45 @@ class MLP_ODE_siren(nn.Module):
 
 def exists(val):
     return val is not None
+
+class MLP_sirenlike(nn.Module):
+    def __init__(self,
+                 num_layers,
+                 dim_hidden,
+                 dim_in=1,
+                 dim_out=1,
+                 w0 = 1., w0_initial = 30., use_bias = True, final_activation = None):
+        super(MLP_sirenlike, self).__init__()
+
+        self.n_layers = num_layers
+        self.n_units = dim_hidden
+        self.n_inputs = dim_in
+        self.neurons_out = dim_out
+        self.use_bias = use_bias
+        self.final_activation = final_activation
+
+        self.net = self.__make_net()
+
+    def __make_net(self):
+        layers = []
+        for i in range(self.n_layers):
+            is_first = i == 0
+            layer_dim_in = self.n_inputs if is_first else self.n_units
+            layers.append(nn.Linear(
+                in_features=layer_dim_in,
+                out_features=self.n_units,
+                bias=self.use_bias
+            ))
+            layers.append(nn.ReLU())
+        layers.append(nn.Linear(
+                in_features=self.n_units,
+                out_features=self.neurons_out,
+                bias=self.use_bias
+            ))
+        return nn.Sequential(*layers)
+
+    def forward(self, t, xy):
+        txy = torch.concat([t, xy], dim=-1)
+
+        out = self.net(txy)
+        return out

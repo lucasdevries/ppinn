@@ -90,7 +90,7 @@ def train(config):
 
 def train_amc(config):
     cases = os.listdir(r'D:/PPINN_patient_data/AMCCTP/CTP_nii_registered')
-    for case in tqdm(cases):
+    for case in tqdm(cases[:1]):
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_AMC(gaussian_filter_type=config.filter_type,
                                              sd=config.sd,
@@ -104,7 +104,7 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(slices)):
+        for slice in tqdm(range(15,16)):
             mask_data = data_dict['mask'][slice]
             valid_voxels = torch.where(mask_data == 1)
 
@@ -123,18 +123,25 @@ def train_amc(config):
                               original_data_shape=scan_dimensions[1:],
                               original_indices=valid_voxels
                               )
+
             result_dict = ppinn.fit(slice,
                                     data_dict,
                                     batch_size=config.batch_size,
                                     epochs=int(config.epochs),
                                     case=case)
 
-            result_dict = drop_unphysical_amc(result_dict)
-            cbf_results[slice, ...] = result_dict['cbf']
-            cbv_results[slice, ...] = result_dict['cbv']
-            mtt_results[slice, ...] = result_dict['mtt']
-            delay_results[slice, ...] = result_dict['delay']
-            tmax_results[slice, ...] = result_dict['tmax']
+            # result_dict = drop_unphysical_amc(result_dict)
+            cbf_results[slice, ...] = result_dict['cbf'].cpu().detach().numpy()
+            cbv_results[slice, ...] = result_dict['cbv'].cpu().detach().numpy()
+            mtt_results[slice, ...] = result_dict['mtt'].cpu().detach().numpy()
+            delay_results[slice, ...] = result_dict['delay'].cpu().detach().numpy()
+            tmax_results[slice, ...] = result_dict['tmax'].cpu().detach().numpy()
+
+            result_dict['cbf'] = result_dict['cbf'].cpu().detach().numpy()
+            result_dict['cbv'] = result_dict['cbv'].cpu().detach().numpy()
+            result_dict['mtt'] = result_dict['mtt'].cpu().detach().numpy()
+            result_dict['delay'] = result_dict['delay'].cpu().detach().numpy()
+            result_dict['tmax'] = result_dict['tmax'].cpu().detach().numpy()
             visualize_amc(case, slice, result_dict, data_dict)
             # visualize_amc_sygno(case, slice, sygnovia_results, data_dict)
 

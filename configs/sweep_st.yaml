@@ -3,28 +3,21 @@ method: grid
 parameters:
   sd:
     values:
-      - 0
-      - 1
       - 2
-      - 3
-      - 4
-      - 5
   cbv_ml:
     values:
-      - 1
-      - 2
-      - 3
-      - 4
       - 5
-  factor:
+  milestone:
     values:
-      - 1
-  epochs:
+      - 1000
+      - 100
+      - 50
+  undersampling:
     values:
-      - 60
-  lr:
+      - 0.0
+  ode_net_type:
     values:
-      - 1e-3
+      - 'MLP_tanh'
 command:
   - ${env}
   - python

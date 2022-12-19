@@ -3,7 +3,7 @@
   "gpu_device": 0,
   "seed": 11,
   "wandb_folder": "./wandb/",
-  "wandb" :false,
+  "wandb" :true,
   "mode": "train",
   "cbv_ml": 5,
   "simulation_method": 2,

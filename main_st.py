@@ -105,18 +105,17 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(slices)[10:11]):
+        for slice in tqdm(range(15,16)):
             mask_data = data_dict['mask'][slice]
             valid_voxels = torch.where(mask_data == 1)
             shape_in = torch.Size([1, len(valid_voxels[0]), 1])
-            if len(valid_voxels[0]) == 0:
+            if len(valid_voxels[0]) * data_dict['curves'].shape[-1] < config.batch_size:
                 cbf_results[slice, ...] = np.zeros([512, 512])
                 cbv_results[slice, ...] = np.zeros([512, 512])
                 mtt_results[slice, ...] = np.zeros([512, 512])
                 delay_results[slice, ...] = np.zeros([512, 512])
                 tmax_results[slice, ...] = np.zeros([512, 512])
                 continue
-
             ppinn = PPINN_amc(config,
                               shape_in=shape_in,
                               n_inputs=1,
@@ -132,7 +131,7 @@ def train_amc(config):
                                     case=case)
 
             # result_dict = drop_unphysical_amc(result_dict)
-
+            #
             mask_data = mask_data.cpu().numpy()
             for key in result_dict.keys():
                 result_dict[key] = result_dict[key].cpu().detach().numpy()
@@ -157,6 +156,7 @@ def train_amc(config):
                                                  tmax_results,
                                                  data_dict
                                                 )
+
 
 def train_isles(config):
     folder = 'TRAINING' if config.mode == 'train' else 'TESTING'

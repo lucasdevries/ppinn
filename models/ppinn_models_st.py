@@ -41,7 +41,9 @@ class PPINN(nn.Module):
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
         self.optimizer = None
         self.scheduler = None
-        self.milestones = [self.config.milestone, 2*self.config.milestone]
+        self.milestones = [self.config.epochs//3, 2*self.config.epochs//3]
+        # self.milestones = [self.config.milestone]
+
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
@@ -165,13 +167,11 @@ class PPINN(nn.Module):
         t = txy[...,:1]
         xy = txy[...,1:]
         c_tissue = self.NN_tissue(t, xy)
-        torch.cuda.synchronize()
 
         c_aif = self.NN_aif(aif_time, xy)
 
-        torch.cuda.synchronize()
         return c_aif, c_tissue
-
+    # @profile
     def forward_complete(self, aif_time, txy):
         t = txy[...,:1]
         xy = txy[...,1:]
@@ -179,21 +179,17 @@ class PPINN(nn.Module):
         # steps = t.shape[0]
         # Get NN output: a tissue curve for each voxel
         c_tissue = self.NN_tissue(t, xy)
-        torch.cuda.synchronize()
 
         c_aif = self.NN_aif(aif_time, xy)
-        torch.cuda.synchronize()
 
         # Get time-derivative of tissue curve
         c_tissue_dt = (1 / self.std_t) * self.__fwd_gradients(c_tissue, t)
-        torch.cuda.synchronize()
 
 
         t = t.detach()
         t.requires_grad = False
         # delay = delay.expand(*self.shape_in, steps, 1)
         params = self.NN_ode(xy)
-        torch.cuda.synchronize()
 
         if self.log_domain:
             cbf = torch.exp(params[..., :1])
@@ -205,16 +201,13 @@ class PPINN(nn.Module):
             delay = 3*params[..., 2:]
 
         c_aif_a = self.NN_aif(t - delay / self.std_t, xy) #128
-        torch.cuda.synchronize()
 
         c_aif_b = self.NN_aif(t - delay / self.std_t - mtt / self.std_t, xy) #128
-        torch.cuda.synchronize()
 
 
         residual = c_tissue_dt - cbf * (c_aif_a - c_aif_b).unsqueeze(-1)
         # cbf, mtt, delay = self.get_ode_params()
         # print(cbf[0,0,0,0], mtt[0,0,0,0], delay[0,0,0,0])
-        torch.cuda.synchronize()
         return c_aif, c_tissue, residual
 
     def forward_complete_check(self, aif_time, txy):
@@ -358,8 +351,9 @@ class PPINN(nn.Module):
                 data_dict['coll_points_min'],
                 data_dict['coll_points_max'])
 
-            curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
-            dataloader = DataLoader(curve_dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=1)
+            # curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
+            # curve_dataset = np.concatenate([data_curves, data_coordinates, collocation_coordinates], axis=-1)
+            # dataloader = DataLoader(curve_dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=1)
 
             integers = np.arange(len(data_curves))
             np.random.shuffle(integers)
@@ -374,11 +368,16 @@ class PPINN(nn.Module):
             #     batch_curves = batch_curves.to(self.device)
             #     batch_coordinates = batch_coordinates.to(self.device)
             #     batch_collo = batch_collo.to(self.device)
+
             for split in splits:
 
                 batch_curves = torch.from_numpy(data_curves[split]).float().to(self.device)
                 batch_coordinates = torch.from_numpy(data_coordinates[split]).float().to(self.device)
                 batch_collo = torch.from_numpy(collocation_coordinates[split]).float().to(self.device)
+            # for batch in dataloader:
+            #     batch_curves = batch[...,:1].float().to(self.device)
+            #     batch_coordinates = batch[...,1:4].float().to(self.device)
+            #     batch_collo = batch[...,4:].float().to(self.device)
 
                 batch_aif = data_aif
                 batch_time = data_time[:,0,0,:]
@@ -389,7 +388,6 @@ class PPINN(nn.Module):
                                                                      batch_curves,
                                                                      batch_boundary,
                                                                      batch_collo)
-                torch.cuda.synchronize()
                 epoch_aif_loss.update(loss_aif.item())
                 epoch_tissue_loss.update(loss_tissue.item())
                 epoch_residual_loss.update(loss_residual.item())
@@ -399,16 +397,16 @@ class PPINN(nn.Module):
             # self.ema.update()
             # if ep == epochs:
             #     self.ema_on = True
-            if self.config.wandb:
-                metrics = {"aif_loss": epoch_aif_loss.avg,
-                           "tissue_loss": epoch_tissue_loss.avg,
-                           "residual_loss": epoch_residual_loss.avg,
-                           "lr": self.optimizer.param_groups[0]['lr'],
-                           }
-                validation_metrics = self.validate()
-                metrics.update(validation_metrics)
-
-                wandb.log(metrics)
+            # if self.config.wandb:
+            #     metrics = {"aif_loss": epoch_aif_loss.avg,
+            #                "tissue_loss": epoch_tissue_loss.avg,
+            #                "residual_loss": epoch_residual_loss.avg,
+            #                "lr": self.optimizer.param_groups[0]['lr'],
+            #                }
+            #     validation_metrics = self.validate()
+            #     metrics.update(validation_metrics)
+            #
+            #     wandb.log(metrics)
 
             if self.epoch % self.config.plot_params_every == 0:
                 try:
@@ -449,9 +447,7 @@ class PPINN(nn.Module):
         if self.lw_data:
             # compute data loss
             c_aif, c_tissue = self.forward_NNs(batch_time, batch_coordinates)
-            torch.cuda.synchronize()
             loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
-            torch.cuda.synchronize()
 
             loss += self.lw_data * (loss_aif + loss_tissue)
 
@@ -459,10 +455,8 @@ class PPINN(nn.Module):
             # compute residual loss
 
             c_aif, c_tissue, residual = self.forward_complete(batch_time, batch_collo)
-            torch.cuda.synchronize()
 
             loss_residual = self.__loss_residual(residual)
-            torch.cuda.synchronize()
 
             loss += self.lw_res * loss_residual
         #     # compute data loss

@@ -13,9 +13,11 @@ parameters:
   lr:
     values:
       - 1e-2
+      - 1e-3
+      - 1e-4
   lw_res:
     values:
-      - 250
+      - 25
 command:
   - ${env}
   - python

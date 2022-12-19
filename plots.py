@@ -3,7 +3,7 @@ import matplotlib.gridspec as gridspec
 import pickle
 import numpy as np
 import os
-from utils.val_utils import drop_edges, drop_unphysical
+from utils.val_utils import drop_edges, drop_unphysical, drop_edges_per_method, drop_unphysical_per_method
 from utils.val_utils import load_sygnovia_results, load_nlr_results, load_phantom_gt, load_sygnovia_results_amc
 from utils.plot_utils import bland_altman_plot
 import matplotlib as mpl
@@ -12,6 +12,7 @@ import SimpleITK as sitk
 from einops.einops import rearrange, repeat
 from tqdm import tqdm
 import pandas as pd
+
 font = {'family': 'serif',
         'color': 'black',
         'weight': 'normal',
@@ -38,6 +39,7 @@ occlusion_side = {'C102': 'L',
                   'C114': 'L',
                   'C115': 'R',
                   'C116': 'R'}
+
 
 # plt.rcParams['text.usetex'] = True
 def load_phantom(folder=r'data/DigitalPhantomCT', cbv_ml=5, simulation_method=2):
@@ -106,6 +108,7 @@ def load_ppinn_results(cbv_ml=5, sd=2, undersample=False):
         results = pickle.load(f)
     return results
 
+
 def load_sppinn_results(cbv_ml=5, sd=2, undersample=False):
     us = 0.5 if undersample else 0.0
     with open(
@@ -114,21 +117,50 @@ def load_sppinn_results(cbv_ml=5, sd=2, undersample=False):
         results = pickle.load(f)
     return results
 
-def get_data(result_dict_function, sd, undersample=False):
-    if not sd:
+
+def get_data(result_dict_function, sd, undersample=False, drop=False):
+    if sd is None:
         data = result_dict_function(cbv_ml=1)
         for key in data.keys():
-            data[key] = np.concatenate(
-                [result_dict_function(cbv_ml=ml, undersample=undersample)[key] for ml in [1, 2, 3, 4, 5]])
+            if drop:
+                data[key] = np.concatenate(
+                    [drop_unphysical_per_method(
+                        drop_edges_per_method(result_dict_function(cbv_ml=ml, undersample=undersample)))[key] for ml in
+                     [1, 2, 3, 4, 5]])
+            else:
+                data[key] = np.concatenate(
+                    [result_dict_function(cbv_ml=ml, undersample=undersample)[key] for ml in [1, 2, 3, 4, 5]])
+
         return data
     else:
         data = result_dict_function(cbv_ml=1, sd=sd)
         for key in data.keys():
-            data[key] = np.concatenate(
-                [result_dict_function(cbv_ml=ml, sd=sd, undersample=undersample)[key] for ml in [1, 2, 3, 4, 5]])
+            if drop:
+                data[key] = np.concatenate(
+                    [drop_unphysical_per_method(
+                        drop_edges_per_method(result_dict_function(cbv_ml=ml, sd=sd, undersample=undersample)))[key] for
+                     ml in [1, 2, 3, 4, 5]])
+            else:
+                data[key] = np.concatenate(
+                    [result_dict_function(cbv_ml=ml, sd=sd, undersample=undersample)[key] for ml in [1, 2, 3, 4, 5]])
         return data
 
 
+#
+# def get_data(result_dict_function, sd, undersample=False):
+#     if sd is None:
+#         data = result_dict_function(cbv_ml=1)
+#         for key in data.keys():
+#             data[key] = np.concatenate(
+#                 [result_dict_function(cbv_ml=ml, undersample=undersample)[key] for ml in [1, 2, 3, 4, 5]])
+#         return data
+#     else:
+#         data = result_dict_function(cbv_ml=1, sd=sd)
+#         for key in data.keys():
+#             data[key] = np.concatenate(
+#                 [result_dict_function(cbv_ml=ml, sd=sd, undersample=undersample)[key] for ml in [1, 2, 3, 4, 5]])
+#         return data
+#
 def make_axes(ax):
     x1 = [112 + 224 * x for x in [0, 1, 2, 3, 4]]
     names = ['1 ml ', '2 ml ', '3 ml ', '4 ml ', '5 ml ']
@@ -145,23 +177,23 @@ def make_axes(ax):
 
 
 def make_grid_plot(sd, drop=False, undersample=False):
-    results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False),
-               'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=undersample),
-               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample),
-               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample)}
-    if drop:
-        results = drop_edges(results)
-        results = drop_unphysical(results)
+    results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False, drop=drop),
+               'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=undersample, drop=drop),
+               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample, drop=drop),
+               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample, drop=drop)}
+    # if drop:
+    #     results = drop_edges(results)
+    #     results = drop_unphysical(results)
 
     min_vals = {'cbf': 0, 'mtt': 0, 'cbv': 0, 'delay': 0, 'tmax': 0}
-    max_vals = {'cbf': 100, 'mtt': 28, 'cbv': 6, 'delay': 3.5, 'tmax': 20}
+    max_vals = {'cbf': 100, 'mtt': 28, 'cbv': 6, 'delay': 3.5, 'tmax': 15}
     title = {'gt': 'GT', 'sygnovia': 'Sygno.via', 'nlr': 'NLR', 'ppinn': 'PPINN'}
     param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
     param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
 
     x1 = [112 + 224 * x for x in [0, 1, 2, 3, 4]]
     if drop:
-        x1 = [110 + 220 * x for x in [0, 1, 2, 3, 4]]
+        x1 = [108 + 194 * x for x in [0, 1, 2, 3, 4]]
     names = ['1 ml ', '2 ml ', '3 ml ', '4 ml ', '5 ml ']
 
     fig = plt.figure(figsize=(10, 15))
@@ -218,30 +250,31 @@ def make_grid_plot(sd, drop=False, undersample=False):
     plt.savefig(name, dpi=150, bbox_inches='tight')
     fig.show()
 
+
 def make_grid_plot_sppinn(sd, drop=False, undersample=False):
-    results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False),
-               'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=undersample),
-               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample),
-               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample),
-               'sppinn': get_data(load_sppinn_results, sd=sd, undersample=undersample),
+    results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False, drop=drop),
+               'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=undersample, drop=drop),
+               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample, drop=drop),
+               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample, drop=drop),
+               'sppinn': get_data(load_sppinn_results, sd=sd, undersample=undersample, drop=drop),
                }
-    if drop:
-        results = drop_edges(results)
-        results = drop_unphysical(results)
+    # if drop:
+    #     results = drop_edges(results)
+    #     results = drop_unphysical(results)
 
     min_vals = {'cbf': 0, 'mtt': 0, 'cbv': 0, 'delay': 0, 'tmax': 0}
-    max_vals = {'cbf': 100, 'mtt': 28, 'cbv': 6, 'delay': 3.5, 'tmax': 20}
-    title = {'gt': 'GT', 'sygnovia': 'Sygno.via', 'nlr': 'NLR', 'ppinn': 'PPINN','sppinn': 'SPPINN'}
+    max_vals = {'cbf': 100, 'mtt': 28, 'cbv': 6, 'delay': 3.5, 'tmax': 15}
+    title = {'gt': 'GT', 'sygnovia': 'Sygno.via', 'nlr': 'NLR', 'ppinn': 'PPINN', 'sppinn': 'SPPINN'}
     param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
     param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
 
     x1 = [112 + 224 * x for x in [0, 1, 2, 3, 4]]
     if drop:
-        x1 = [110 + 220 * x for x in [0, 1, 2, 3, 4]]
+        x1 = [108 + 194 * x for x in [0, 1, 2, 3, 4]]
     names = ['1 ml ', '2 ml ', '3 ml ', '4 ml ', '5 ml ']
 
-    fig = plt.figure(figsize=(10, 15))
-    outer = gridspec.GridSpec(3, 2, wspace=0.5, hspace=0.3)
+    fig = plt.figure(figsize=(10, 14))
+    outer = gridspec.GridSpec(3, 2, wspace=0.5, hspace=0.1)
     for i, param in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
         inner = gridspec.GridSpecFromSubplotSpec(1, 5,
                                                  subplot_spec=outer[i],
@@ -249,12 +282,12 @@ def make_grid_plot_sppinn(sd, drop=False, undersample=False):
                                                  hspace=0.1)
         ax = plt.Subplot(fig, outer[i])
         if i != 5:
-            ax.set_title(f'{param_title[param]}', size=14, pad=20)
+            ax.set_title(f'{param_title[param]}', size=14, pad=5)
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_axis_off()
         fig.add_subplot(ax)
-        for j, key in zip(range(6), ['gt', 'sygnovia', 'nlr', 'ppinn', 'sppinn','']):
+        for j, key in zip(range(6), ['gt', 'sygnovia', 'nlr', 'ppinn', 'sppinn', '']):
             if j < 5:
                 ax = plt.Subplot(fig, inner[j])
                 ax.imshow(results[key][param], cmap='jet', vmin=min_vals[param], vmax=max_vals[param])
@@ -294,60 +327,59 @@ def make_grid_plot_sppinn(sd, drop=False, undersample=False):
     name = f'visuals/sppinn_phantom_results_sd_{sd}_us_{str(undersample)}_drop_{str(drop)}.png'
     plt.savefig(name, dpi=150, bbox_inches='tight')
     fig.show()
-def log_software_results(results, metric, sd):
+
+
+def log_software_results(results, metric, sd, undersample=False):
     assert metric in ['mse', 'mae', 'me']
     table = []
     for key in ['cbf', 'cbv', 'mtt', 'delay', 'tmax']:
         if metric == 'mse':
-            table.append([f"{key}",sd,
-                          np.mean((results['nlr'][key] - results['gt'][key]) ** 2),
-                          np.mean((results['sygnovia'][key] - results['gt'][key]) ** 2),
-                          np.mean((results['ppinn'][key] - results['gt'][key]) ** 2),
-                          np.mean((results['sppinn'][key] - results['gt'][key]) ** 2)])
+            table.append([f"{key}", sd, undersample,
+                          np.nanmean((results['nlr'][key] - results['gt'][key]) ** 2),
+                          np.nanmean((results['sygnovia'][key] - results['gt'][key]) ** 2),
+                          np.nanmean((results['ppinn'][key] - results['gt'][key]) ** 2),
+                          np.nanmean((results['sppinn'][key] - results['gt'][key]) ** 2)])
         elif metric == 'mae':
-            table.append([f"{key}",sd,
-                          np.mean(np.abs(results['nlr'][key] - results['gt'][key])),
-                          np.mean(np.abs(results['sygnovia'][key] - results['gt'][key])),
-                          np.mean(np.abs(results['ppinn'][key] - results['gt'][key])),
-                          np.mean(np.abs(results['sppinn'][key] - results['gt'][key]))])
+            table.append([f"{key}", sd, undersample,
+                          np.nanmean(np.abs(results['nlr'][key] - results['gt'][key])),
+                          np.nanmean(np.abs(results['sygnovia'][key] - results['gt'][key])),
+                          np.nanmean(np.abs(results['ppinn'][key] - results['gt'][key])),
+                          np.nanmean(np.abs(results['sppinn'][key] - results['gt'][key]))])
         elif metric == 'me':
-            table.append([f"{key}",sd,
-                          np.mean(results['nlr'][key] - results['gt'][key]),
-                          np.mean(results['sygnovia'][key] - results['gt'][key]),
-                          np.mean(results['ppinn'][key] - results['gt'][key]),
-                          np.mean(results['sppinn'][key] - results['gt'][key])])
+            table.append([f"{key}", sd, undersample,
+                          np.nanmean(results['nlr'][key] - results['gt'][key]),
+                          np.nanmean(results['sygnovia'][key] - results['gt'][key]),
+                          np.nanmean(results['ppinn'][key] - results['gt'][key]),
+                          np.nanmean(results['sppinn'][key] - results['gt'][key])])
         else:
             raise NotImplementedError('Not implemented')
 
-    df = pd.DataFrame(columns=['parameter', 'sd','NLR', 'Sygno.via', 'PPINN', 'SPPINN'], data=table)
+    df = pd.DataFrame(columns=['parameter', 'sd', 'undersample', 'NLR', 'Sygno.via', 'PPINN', 'SPPINN'], data=table)
     return df
 
-def make_sd_plot(drop=True, undersample=False, metric='mae'):
 
-
+def make_undersample_plot(drop=True, undersample=False, metric='mae', sd=2):
     dfs = []
-    for i in range(0,5):
-        results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False),
-                   'sygnovia': get_data(load_sygnovia_results, sd=i, undersample=undersample),
-                   'nlr': get_data(load_nlr_results, sd=i, undersample=undersample),
-                   'ppinn': get_data(load_ppinn_results, sd=i, undersample=undersample),
-                   'sppinn': get_data(load_sppinn_results, sd=i, undersample=undersample),
+    for i in [True, False]:
+        results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False, drop=drop),
+                   'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=i, drop=drop),
+                   'nlr': get_data(load_nlr_results, sd=sd, undersample=i, drop=drop),
+                   'ppinn': get_data(load_ppinn_results, sd=sd, undersample=i, drop=drop),
+                   'sppinn': get_data(load_sppinn_results, sd=sd, undersample=i, drop=drop),
                    }
-        if drop:
-            results = drop_edges(results)
-            results = drop_unphysical(results)
-        df = log_software_results(results, metric=metric, sd=i)
+
+        df = log_software_results(results, metric=metric, sd=2, undersample=i)
         dfs.append(df)
 
     df = pd.concat(dfs)
-    print(df)
+    df['us'] = np.where(df['undersample'] == True, 0.5, 0)
 
-    title = {'gt': 'GT', 'sygnovia': 'Sygno.via', 'nlr': 'NLR', 'ppinn': 'PPINN','sppinn': 'SPPINN'}
+    title = {'gt': 'GT', 'sygnovia': 'Sygno.via', 'nlr': 'NLR', 'ppinn': 'PPINN', 'sppinn': 'SPPINN'}
     param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
     param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
 
-    fig = plt.figure(figsize=(12, 2.5))
-    outer = gridspec.GridSpec(1, 5, wspace=1, hspace=0.3)
+    fig = plt.figure(figsize=(12, 2.2))
+    outer = gridspec.GridSpec(1, 5, wspace=0.7, hspace=3)
     for i, param in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
         inner = gridspec.GridSpecFromSubplotSpec(1, 1,
                                                  subplot_spec=outer[i],
@@ -355,25 +387,152 @@ def make_sd_plot(drop=True, undersample=False, metric='mae'):
                                                  hspace=0)
         ax = plt.Subplot(fig, outer[i])
         ax.set_title(f'{param_title[param]}', size=14)
-        x = df[df['parameter']==param]['sd']
-        colors = {'nlr':'k', 'sygnovia':'r', 'ppinn':'g', 'sppinn':'b'}
+        x = df[df['parameter'] == param]['us']
+        colors = {'nlr': 'mediumpurple', 'sygnovia': 'firebrick', 'ppinn': 'forestgreen', 'sppinn': 'cornflowerblue'}
+        marker = {'nlr': 'o', 'sygnovia': "^", 'ppinn': "s", 'sppinn': "D"}
         for key in ['nlr', 'sygnovia', 'ppinn', 'sppinn']:
             y = df[df['parameter'] == param][title[key]]
-            ax.plot(x, y, '--', lw=1.5, marker='o', c=colors[key], label=title[key])
-            ax.set_ylabel('MAE ' +str(param_unts[param]), fontdict=font)
-            ax.set_xlabel('Standard dev.', fontdict=font)
-
+            ax.plot(x, y, '--', lw=1.5, marker=marker[key], c=colors[key], label=title[key])
+            ax.set_ylabel('MAE ' + str(param_unts[param]), fontdict=font)
+            ax.set_xlabel('Undersampling rate', fontdict=font)
 
         # ax.set_xticks([])
-        # ax.set_yticks([])
+        ax.set_xticks([0, 0.5])
         # ax.set_axis_off()
 
         fig.add_subplot(ax)
 
-    # name = f'visuals/sppinn_phantom_results_sd_{sd}_us_{str(undersample)}_drop_{str(drop)}.png'
-    # plt.savefig(name, dpi=150, bbox_inches='tight')
+    ax.legend(frameon=False, loc='center left', bbox_to_anchor=(1, 0.5))
+
+    name = f'visuals/undersample_plot_results_us_{str(undersample)}_drop_{str(drop)}.png'
+    plt.savefig(name, dpi=150, bbox_inches='tight')
     plt.show()
-    print('hoi')
+
+
+def make_sd_plot(drop=True, undersample=False, metric='mae'):
+    dfs = []
+    for i in tqdm(range(0, 6)):
+        results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False, drop=drop),
+                   'sygnovia': get_data(load_sygnovia_results, sd=i, undersample=undersample, drop=drop),
+                   'nlr': get_data(load_nlr_results, sd=i, undersample=undersample, drop=drop),
+                   'ppinn': get_data(load_ppinn_results, sd=i, undersample=undersample, drop=drop),
+                   'sppinn': get_data(load_sppinn_results, sd=i, undersample=undersample, drop=drop),
+                   }
+        # results['nlr']['cbf'][np.isnan(results['nlr']['cbf'])] = 0
+        df = log_software_results(results, metric=metric, sd=i)
+        dfs.append(df)
+
+    df = pd.concat(dfs)
+    print(df)
+
+    title = {'gt': 'GT', 'sygnovia': 'Sygno.via', 'nlr': 'NLR', 'ppinn': 'PPINN', 'sppinn': 'SPPINN'}
+    param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
+    param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
+
+    fig = plt.figure(figsize=(12, 2.2))
+    outer = gridspec.GridSpec(1, 5, wspace=0.7, hspace=3)
+    for i, param in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
+        inner = gridspec.GridSpecFromSubplotSpec(1, 1,
+                                                 subplot_spec=outer[i],
+                                                 wspace=0,
+                                                 hspace=0)
+        ax = plt.Subplot(fig, outer[i])
+        ax.set_title(f'{param_title[param]}', size=12)
+        x = df[df['parameter'] == param]['sd']
+        colors = {'nlr': 'mediumpurple', 'sygnovia': 'firebrick', 'ppinn': 'forestgreen', 'sppinn': 'cornflowerblue'}
+        marker = {'nlr': 'o', 'sygnovia': "^", 'ppinn': "s", 'sppinn': "D"}
+        for key in ['nlr', 'sygnovia', 'ppinn', 'sppinn']:
+            y = df[df['parameter'] == param][title[key]]
+            ax.plot(x, y, '--', lw=1.5, marker=marker[key], c=colors[key], label=title[key])
+            ax.set_ylabel('MAE ' + str(param_unts[param]), fontdict=font)
+            ax.set_xlabel('Standard dev.', fontdict=font)
+
+        # ax.set_xticks([])
+        ax.set_xticks([0, 1, 2, 3, 4, 5])
+        # ax.set_axis_off()
+
+        fig.add_subplot(ax)
+
+    ax.legend(frameon=False, loc='center left', bbox_to_anchor=(1, 0.5))
+
+    name = f'visuals/sdplot_results_us_{str(undersample)}_drop_{str(drop)}.png'
+    plt.savefig(name, dpi=150, bbox_inches='tight')
+    plt.show()
+
+def make_cbv_plot(drop=True, undersample=False, metric='mae', sd=2):
+
+    results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False, drop=drop),
+               'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=undersample, drop=drop),
+               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample, drop=drop),
+               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample, drop=drop),
+               'sppinn': get_data(load_sppinn_results, sd=sd, undersample=undersample, drop=drop),
+               }
+
+    cbf = {}
+    mtt = {}
+    cbv = {}
+    delay = {}
+    tmax = {}
+
+    for key in ['gt', 'sygnovia', 'nlr', 'ppinn', 'sppinn']:
+        cbf[key] = {i: results[key]['cbf'][(i-1)*196:i*196] for i in range(1,6)}
+        mtt[key] = {i: results[key]['mtt'][(i-1)*196:i*196] for i in range(1,6)}
+        cbv[key] = {i: results[key]['cbv'][(i-1)*196:i*196] for i in range(1,6)}
+        delay[key] = {i: results[key]['delay'][(i-1)*196:i*196] for i in range(1,6)}
+        tmax[key] = {i: results[key]['tmax'][(i-1)*196:i*196] for i in range(1,6)}
+
+    cbf_err = {}
+    mtt_err = {}
+    cbv_err = {}
+    delay_err = {}
+    tmax_err = {}
+
+    for key in ['gt', 'sygnovia', 'nlr', 'ppinn', 'sppinn']:
+        cbf_err[key] = {i: np.nanmean(np.abs(cbf[key][i]-cbf['gt'][i]))/np.nanmean(cbf['gt'][i]) for i in range(1,6)}
+        mtt_err[key] = {i: np.nanmean(np.abs(mtt[key][i]-mtt['gt'][i]))/np.nanmean(mtt['gt'][i]) for i in range(1,6)}
+        cbv_err[key] = {i: np.nanmean(np.abs(cbv[key][i]-cbv['gt'][i]))/np.nanmean(cbv['gt'][i]) for i in range(1,6)}
+        delay_err[key] = {i: np.nanmean(np.abs(delay[key][i]-delay['gt'][i]))/np.nanmean(delay['gt'][i]) for i in range(1,6)}
+        tmax_err[key] = {i: np.nanmean(np.abs(tmax[key][i]-tmax['gt'][i]))/np.nanmean(tmax['gt'][i]) for i in range(1,6)}
+
+
+
+    title = {'gt': 'GT', 'sygnovia': 'Sygno.via', 'nlr': 'NLR', 'ppinn': 'PPINN', 'sppinn': 'SPPINN'}
+    param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
+    param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
+    param_dicts = {'cbf': cbf_err, 'mtt': mtt_err, 'cbv': cbv_err, 'delay': delay_err, 'tmax': tmax_err}
+
+    fig = plt.figure(figsize=(12, 2.2))
+    outer = gridspec.GridSpec(1, 5, wspace=0.7, hspace=3)
+    for i, param in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
+        inner = gridspec.GridSpecFromSubplotSpec(1, 1,
+                                                 subplot_spec=outer[i],
+                                                 wspace=0,
+                                                 hspace=0)
+        ax = plt.Subplot(fig, outer[i])
+        ax.set_title(f'{param_title[param]}', size=12)
+        x = [1,2,3,4,5]
+
+        colors = {'nlr': 'mediumpurple', 'sygnovia': 'firebrick', 'ppinn': 'forestgreen', 'sppinn': 'cornflowerblue'}
+        marker = {'nlr': 'o', 'sygnovia': "^", 'ppinn': "s", 'sppinn': "D"}
+
+        for key in ['nlr', 'sygnovia', 'ppinn', 'sppinn']:
+            y = param_dicts[param][key].values()
+            ax.plot(x, y, '--', lw=1.5, marker=marker[key], c=colors[key], label=title[key])
+            ax.set_ylabel('MAE ' + str(param_unts[param]), fontdict=font)
+            ax.set_xlabel('CBV [ml/100g]', fontdict=font)
+
+        # ax.set_xticks([])
+        ax.set_xticks([1, 2, 3, 4, 5])
+        # ax.set_axis_off()
+
+        fig.add_subplot(ax)
+
+    ax.legend(frameon=False, loc='center left', bbox_to_anchor=(1, 0.5))
+
+    name = f'visuals/cbvplot_results_us_{str(undersample)}_drop_{str(drop)}.png'
+    plt.savefig(name, dpi=150, bbox_inches='tight')
+    plt.show()
+
 def make_ba_plots(sd, drop=False, undersample=False):
     results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False),
                'sygnovia': get_data(load_sygnovia_results, sd=sd, undersample=undersample),
@@ -452,7 +611,6 @@ def make_amc_param_plots(contralateral=False):
             results['healthy'] = results['contra'] * results['vesselmask']
             results['infarcted'] = results['dwi_seg'] * results['vesselmask']
 
-
         fig = plt.figure(figsize=(10, 5))
         outer = gridspec.GridSpec(2, 3, wspace=0.55, hspace=0.55)
         for i, key in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
@@ -496,8 +654,6 @@ def lines_box_plot_amc(contralateral=False):
                        'mip': sitk.ReadImage(os.path.join(r"D:\PPINN_patient_data\AMCCTP\MIP", case, "mip.nii.gz")),
                        'contra': sitk.ReadImage(os.path.join(r"D:\PPINN_patient_data\AMCCTP\MRI_nii_registered", case,
                                                              "DWI_seg_registered_contralateral.nii.gz"))}
-
-
 
             spacing = results['dwi_seg'].GetSpacing()
             results = {key: sitk.GetArrayFromImage(val) for key, val in results.items()}
@@ -571,33 +727,32 @@ def plot_sv_vs_ppinn():
                    'brainmask': sitk.ReadImage(os.path.join(base, case, "brainmask.nii.gz"))}
         results = {key: sitk.GetArrayFromImage(val) for key, val in results.items()}
         results_sv = load_sygnovia_results_amc(case)
-        svmask = results_sv['cbf'] + results_sv['mtt'] + results_sv['cbv'] +results_sv['delay'] + results_sv['tmax']
+        svmask = results_sv['cbf'] + results_sv['mtt'] + results_sv['cbv'] + results_sv['delay'] + results_sv['tmax']
         results_sv['sv_mask'] = np.zeros_like(results_sv['cbf'])
-        results_sv['sv_mask'][svmask!=0] = 1
-        min_vals_ppinn = {'cbf': np.percentile(results['cbf'][results['vesselmask']==1], q=5),
-                          'mtt': 0,
-                          'cbv': np.percentile(results['cbv'][results['vesselmask']==1], q=5),
-                          'delay': 0,
-                          'tmax': 0}
+        results_sv['sv_mask'][svmask != 0] = 1
+        min_vals_ppinn = {'cbf': np.percentile(results['cbf'][results['vesselmask'] == 1], q=10),
+                          'mtt': np.percentile(results['mtt'][results['vesselmask'] == 1], q=10),
+                          'cbv': np.percentile(results['cbv'][results['vesselmask'] == 1], q=10),
+                          'delay': np.percentile(results['delay'][results['vesselmask'] == 1], q=10),
+                          'tmax': np.percentile(results['tmax'][results['vesselmask'] == 1], q=10)}
 
-        max_vals_ppinn = {'cbf': np.percentile(results['cbf'][results['vesselmask']==1], q=95),
-                          'mtt': 10,
-                          'cbv': np.percentile(results['cbv'][results['vesselmask']==1], q=95),
-                          'delay': np.percentile(results['delay'][results['vesselmask']==1], q=95),
-                          'tmax': 6}
+        max_vals_ppinn = {'cbf': np.percentile(results['cbf'][results['vesselmask'] == 1], q=90),
+                          'mtt': np.percentile(results['mtt'][results['vesselmask'] == 1], q=90),
+                          'cbv': np.percentile(results['cbv'][results['vesselmask'] == 1], q=90),
+                          'delay': np.percentile(results['delay'][results['vesselmask'] == 1], q=90),
+                          'tmax': np.percentile(results['tmax'][results['vesselmask'] == 1], q=90)}
 
-        min_vals_sv = {'cbf': np.percentile(results_sv['cbf'][results_sv['sv_mask']==1], q=5),
-                          'mtt': 0,
-                          'cbv': np.percentile(results_sv['cbv'][results_sv['sv_mask']==1], q=5),
-                          'delay': 0,
-                          'tmax': 0}
+        min_vals_sv = {'cbf': np.percentile(results_sv['cbf'][results_sv['sv_mask'] == 1], q=10),
+                       'mtt': np.percentile(results_sv['mtt'][results_sv['sv_mask'] == 1], q=10),
+                       'cbv': np.percentile(results_sv['cbv'][results_sv['sv_mask'] == 1], q=10),
+                       'delay': np.percentile(results_sv['delay'][results_sv['sv_mask'] == 1], q=10),
+                       'tmax': np.percentile(results_sv['tmax'][results_sv['sv_mask'] == 1], q=10)}
 
-        max_vals_sv = {'cbf': np.percentile(results_sv['cbf'][results_sv['sv_mask']==1], q=95),
-                          'mtt': 10,
-                          'cbv': np.percentile(results_sv['cbv'][results_sv['sv_mask']==1], q=95),
-                          'delay': np.percentile(results_sv['delay'][results_sv['sv_mask']==1], q=95),
-                          'tmax': 6}
-
+        max_vals_sv = {'cbf': np.percentile(results_sv['cbf'][results_sv['sv_mask'] == 1], q=90),
+                       'mtt': np.percentile(results_sv['mtt'][results_sv['sv_mask'] == 1], q=90),
+                       'cbv': np.percentile(results_sv['cbv'][results_sv['sv_mask'] == 1], q=90),
+                       'delay': np.percentile(results_sv['delay'][results_sv['sv_mask'] == 1], q=90),
+                       'tmax': np.percentile(results_sv['tmax'][results_sv['sv_mask'] == 1], q=90)}
 
         for k in range(results_sv['core'].shape[0]):
             fig = plt.figure(figsize=(9, 4))
@@ -613,7 +768,7 @@ def plot_sv_vs_ppinn():
                 ax.set_xticks([])
                 ax.set_yticks([])
                 # ax.set_axis_off()
-                if i ==0:
+                if i == 0:
                     ax.set_ylabel('PPINN', fontdict=font)
                 fig.add_subplot(ax)
                 norm = mpl.colors.Normalize(vmin=min_vals_ppinn[key], vmax=max_vals_ppinn[key])
@@ -634,7 +789,7 @@ def plot_sv_vs_ppinn():
                 ax.set_xticks([])
                 ax.set_yticks([])
                 # ax.set_axis_off()
-                if i ==0:
+                if i == 0:
                     ax.set_ylabel('Sygno.via', fontdict=font)
                 fig.add_subplot(ax)
                 norm = mpl.colors.Normalize(vmin=min_vals_sv[key], vmax=max_vals_sv[key])
@@ -658,9 +813,9 @@ def plot_sv_vs_ppinn():
 
 def plot_ppinn_maps(case, slice):
     base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_ppinn_amcctp"
-    min_vals = {'cbf': 0, 'mtt': 0, 'cbv': 0, 'delay': 1, 'tmax': 0}
-    max_vals = {'cbf': 35, 'mtt': 13, 'cbv': 3, 'delay': 2.5, 'tmax': 12}
-    param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
+    min_vals = {'scan':0.1, 'cbf': 0.01, 'mtt':2 , 'cbv': 0.01, 'delay': 0.01, 'tmax': 2}
+    max_vals = {'scan':150, 'cbf': 35, 'mtt': 8, 'cbv': 3, 'delay': 2., 'tmax': 6}
+    param_title = {'scan':'scan','cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
     param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
     results = {'cbv': sitk.ReadImage(os.path.join(base, case, "cbv.nii")),
                'cbf': sitk.ReadImage(os.path.join(base, case, "cbf.nii")),
@@ -668,14 +823,22 @@ def plot_ppinn_maps(case, slice):
                'tmax': sitk.ReadImage(os.path.join(base, case, "tmax.nii")),
                'delay': sitk.ReadImage(os.path.join(base, case, "delay.nii")),
                'dwi_seg': sitk.ReadImage(os.path.join(base, case, "dwi_seg.nii")),
-               'brainmask': sitk.ReadImage(os.path.join(base, case, "brainmask.nii.gz"))}
+               'brainmask': sitk.ReadImage(os.path.join(base, case, "brainmask.nii.gz")),
+               'scan': sitk.ReadImage(rf"D:\PPINN_patient_data\AMCCTP\CTP_nii_registered\{case}\14.nii.gz")}
     results = {key: sitk.GetArrayFromImage(val) for key, val in results.items()}
-
+    cmap = mpl.cm.get_cmap('jet').copy()
+    cmap.set_under(color='black')
+    cmap_bw = mpl.cm.get_cmap('Greys_r').copy()
+    cmap_bw.set_under(color='black')
     for k in range(results['dwi_seg'].shape[0]):
         if k == slice:
-            for i, key in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
+            for i, key in zip(range(6), ['scan','cbf', 'mtt', 'cbv', 'delay', 'tmax']):
                 fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-                ax.imshow(results[key][k], cmap='jet', vmin=min_vals[key], vmax=max_vals[key])
+                if key == 'scan':
+                    ax.imshow(results[key][k], cmap=cmap_bw, vmin=min_vals[key], vmax=max_vals[key])
+                else:
+                    ax.imshow(results[key][k], cmap=cmap, vmin=min_vals[key], vmax=max_vals[key])
+
                 ax.set_xticks([])
                 ax.set_yticks([])
                 ax.set_axis_off()
@@ -690,7 +853,7 @@ def make_phantom_plot():
     ys = [222, 20, 90]
     col = ['k', 'slategrey', 'silver']
 
-    fig = plt.figure(figsize=(6.5, 5.5))
+    fig = plt.figure(figsize=(6.5, 3.5))
     ax = [fig.add_subplot(1, 2, 1), fig.add_subplot(1, 2, 2)]
     ax[0].plot(data['time'], data['aif'], label=r'$C_{AIF}(t)$', c='firebrick', lw=2)
     ax[0].plot(data['time'], data['vof'], label=r'$C_{VOF}(t)$', c='royalblue', lw=2)
@@ -702,8 +865,8 @@ def make_phantom_plot():
         tac = data['perfusion_data'][2, 4, i, j, :]
         ax[1].plot(data['time'], tac, label=f'CBV: {cbv} ml/100g,\nMTT: {mtt} s, $t_d$: {delay} s', c=col[ix], lw=2)
 
-    ax[1].set_ylim(20, 100)
-    ax[0].set_ylim(20, 300)
+    ax[1].set_ylim(20, 130)
+    ax[0].set_ylim(20, 400)
 
     # ax[1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
     ax[0].legend(frameon=False, prop={'size': 12})
@@ -728,19 +891,30 @@ if __name__ == '__main__':
     # make_plots(sd=4, drop=True)
     # make_grid_plot(sd=1, drop=True, undersample=False)
     # make_grid_plot(sd=2, drop=True, undersample=False)
+    # make_grid_plot(sd=2, drop=False, undersample=False)
+
     # make_grid_plot(sd=3, drop=True, undersample=False)
     # make_grid_plot(sd=4, drop=True, undersample=False)
     # make_grid_plot(sd=5, drop=True, undersample=False)
     # make_grid_plot(sd=2, drop=True, undersample=True)
-    # make_grid_plot(sd=2, drop=False, undersample=False)
+    # make_grid_plot(sd=0, drop=False, undersample=False)
     # make_grid_plot(sd=3, drop=False, undersample=False)
     # make_grid_plot(sd=4, drop=False, undersample=False)
     # make_grid_plot(sd=5, drop=False, undersample=False)
     # make_grid_plot(sd=2, drop=False, undersample=True)
-    # make_amc_param_plots(contralateral=False)
+    # make_amc_param_plots(contralateral=True)
     # lines_box_plot_amc(contralateral=True)
     # lines_box_plot_amc(contralateral=False)
+    # plot_ppinn_maps('C116', 15)
+    # for i in range(6):
+        # make_grid_plot_sppinn(sd=i, drop=True, undersample=False)
+    # make_phantom_plot()
+
     # make_grid_plot_sppinn(sd=2, drop=True, undersample=False)
-    # plot_sv_vs_ppinn()
+    # make_grid_plot_sppinn(sd=0, drop=True, undersample=False)
+
+    plot_sv_vs_ppinn()
     # plot_ppinn_maps('C114', slice=11)
-    make_sd_plot()
+    # make_sd_plot(drop=True)
+    # make_undersample_plot(drop=True)
+    # make_cbv_plot(drop=True)

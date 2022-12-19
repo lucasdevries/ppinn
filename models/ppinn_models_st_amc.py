@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from models.MLP_st import MLP, MLP_ODE, MLP_siren, MLP_ODE_siren
+from models.MLP_st import MLP, MLP_ODE, MLP_siren, MLP_ODE_siren, MLP_sirenlike
 from utils.train_utils import AverageMeter, weightConstraint
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
@@ -10,6 +10,7 @@ from tqdm import tqdm
 import logging
 import os
 import wandb
+from torchsummary import summary
 from utils.data_utils import CurveDataset
 import pickle
 from utils.val_utils import load_nlr_results, plot_curves_at_epoch_amc_st
@@ -44,7 +45,7 @@ class PPINN_amc(nn.Module):
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
         self.optimizer = None
         self.scheduler = None
-        self.milestones = [self.config.milestone]
+        self.milestones = [self.config.epochs//3, 2*self.config.epochs//3]
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
@@ -75,64 +76,49 @@ class PPINN_amc(nn.Module):
         self.batch_size = config.batch_size
         self.data_coordinates_xy = None
 
-        # if self.config.siren:
-        #     print('using SirenNets')
-        #     self.NN_tissue = MLP_siren(
-        #                     dim_in=3,  # input dimension, ex. 2d coor
-        #                     dim_hidden=n_units,  # hidden dimension
-        #                     dim_out=1,  # output dimension, ex. rgb value
-        #                     num_layers=n_layers,  # number of layers
-        #                     final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-        #                     w0_initial=self.config.siren_w0
-        #                     # different signals may require different omega_0 in the first layer - this is a hyperparameter
-        #                 )
-        #     # self.NN_ode = MLP_ODE_siren(
-        #     #                         dim_in=2,  # input dimension, ex. 2d coor
-        #     #                         dim_hidden=n_units,  # hidden dimension
-        #     #                         dim_out=3,  # output dimension, ex. rgb value
-        #     #                         num_layers=n_layers,  # number of layers
-        #     #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-        #     #                         w0_initial=self.config.siren_w0
-        #     #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
-        #     #                     )
-        # else:
-        print('using MLPs')
-        self.NN_tissue = MLP(
-            False,
-            n_layers,
-            n_units,
-            n_inputs=3,
-            neurons_out=1,
-            bn=bn,
-            act='tanh'
-        )
-        # self.NN_tissue = MLP_siren(
-        #                         dim_in=3,  # input dimension, ex. 2d coor
-        #                         dim_hidden=n_units,  # hidden dimension
-        #                         dim_out=1,  # output dimension, ex. rgb value
-        #                         num_layers=n_layers,  # number of layers
-        #                         final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-        #                         w0_initial=self.config.siren_w0
-        #                         # different signals may require different omega_0 in the first layer - this is a hyperparameter
-        #                     )
-        self.NN_ode = MLP_ODE(
-            n_layers,
-            n_units,
-            n_inputs=2,
-            neurons_out=3,
-            bn=bn,
-            act='tanh'
-        )
-        #
-        # self.NN_ode = MLP_ODE_siren(
-        #                                 dim_in=2,  # input dimension, ex. 2d coor
-        #                                 dim_hidden=16,  # hidden dimension
-        #                                 dim_out=3,  # output dimension, ex. rgb value
-        #                                 num_layers=3,  # number of layers
-        #                                 final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
-        #                                 w0_initial=self.config.siren_w0
-        #                                 # different signals may require different omega_0 in the first layer - this is a hyperparameter
-        #                             )
+        if self.config.siren:
+            print('using sirens')
+            self.NN_tissue = MLP_siren(
+                                    dim_in=3,  # input dimension, ex. 2d coor
+                                    dim_hidden=self.config.hidden_tissue,  # hidden dimension
+                                    dim_out=1,  # output dimension, ex. rgb value
+                                    num_layers=3,  # number of layers
+                                    final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+                                    w0_initial=self.config.siren_w0
+                                    # different signals may require different omega_0 in the first layer - this is a hyperparameter
+                                )
+            self.NN_ode = MLP_ODE_siren(
+                                            dim_in=2,  # input dimension, ex. 2d coor
+                                            dim_hidden=16,  # hidden dimension
+                                            dim_out=3,  # output dimension, ex. rgb value
+                                            num_layers=3,  # number of layers
+                                            final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
+                                            w0_initial=self.config.siren_w0
+                                            # different signals may require different omega_0 in the first layer - this is a hyperparameter
+                                        )
+
+        else:
+            print('using MLPs')
+            self.NN_tissue = MLP(
+                False,
+                n_layers,
+                self.config.hidden_tissue,
+                n_inputs=3,
+                neurons_out=1,
+                bn=bn,
+                act='tanh'
+            )
+
+            self.NN_ode = MLP_ODE(
+                n_layers,
+                n_units,
+                n_inputs=2,
+                neurons_out=3,
+                bn=bn,
+                act='tanh'
+            )
+
+
 
         self.NN_aif = MLP(
             True,
@@ -288,7 +274,7 @@ class PPINN_amc(nn.Module):
             return constant * flow
         else:
             return constant * flow * 60
-    # @profile
+
     def fit(self,
             slice,
             data_dict,
@@ -324,36 +310,36 @@ class PPINN_amc(nn.Module):
         collocation_coordinates = rearrange(collocation_txys, 'dum1 t val -> (dum1 t) val')
         # data_indices = rearrange(data_indices, 'dum1 t val-> (dum1 t ) val')
 
-        plot_tissue_msu(data_coordinates, data_curves, self.NN_tissue, case, self.original_data_indices, slice, timepoints)
+        # plot_tissue_msu(data_coordinates, data_curves, self.NN_tissue, case, self.original_data_indices, slice, timepoints)
 
-        cbf = self.get_cbf(seconds=False).squeeze()
-        mtt = self.get_mtt(seconds=True).squeeze()
-        mtt_min = self.get_mtt(seconds=False).squeeze()
-        delay = self.get_delay(seconds=True).squeeze()
-
-        cbv = cbf * mtt_min
-        tmax = delay + 0.5*mtt
-
-        result_dict = {'cbf': cbf,
-                'cbv': cbv,
-                'mtt': mtt,
-                'delay': delay,
-                'tmax': tmax}
-        # result_dict = drop_unphysical_amc(result_dict)
-        mask_data = data_dict['mask'][slice]
-        mask_data = mask_data.cpu().numpy()
-        for key in result_dict.keys():
-            result_dict[key] = result_dict[key].cpu().detach().numpy()
-            result_dict[key] *= mask_data
-
-        visualize_amc(case, slice, result_dict, data_dict)
+        # cbf = self.get_cbf(seconds=False).squeeze()
+        # mtt = self.get_mtt(seconds=True).squeeze()
+        # mtt_min = self.get_mtt(seconds=False).squeeze()
+        # delay = self.get_delay(seconds=True).squeeze()
+        #
+        # cbv = cbf * mtt_min
+        # tmax = delay + 0.5*mtt
+        #
+        # result_dict = {'cbf': cbf,
+        #         'cbv': cbv,
+        #         'mtt': mtt,
+        #         'delay': delay,
+        #         'tmax': tmax}
+        # # result_dict = drop_unphysical_amc(result_dict)
+        # mask_data = data_dict['mask'][slice]
+        # mask_data = mask_data.cpu().numpy()
+        # for key in result_dict.keys():
+        #     result_dict[key] = result_dict[key].cpu().detach().numpy()
+        #     result_dict[key] *= mask_data
+        #
+        # visualize_amc(case, slice, result_dict, data_dict)
 
         for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
             collocation_coordinates[:, 0] = torch.FloatTensor(*collocation_coordinates.shape[:-1]).uniform_(
                  torch.min(data_time), torch.max(data_time)
             )
-            curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
-            dataloader = DataLoader(curve_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+            # curve_dataset = CurveDataset(data_curves, data_coordinates, collocation_coordinates)
+            # dataloader = DataLoader(curve_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
@@ -399,51 +385,51 @@ class PPINN_amc(nn.Module):
                 #
                 #     plot_curves_at_epoch_amc_st(data_dict, curves_to_plt, self.device, self.forward_NNs, iter, case, slice,
                 #                                 plot_estimates=True)
-                if self.config.wandb:
-                    metrics = {"aif_loss": epoch_aif_loss.value,
-                               "tissue_loss": epoch_tissue_loss.value,
-                               "residual_loss": epoch_residual_loss.value,
-                               "lr": self.optimizer.param_groups[0]['lr'],
-                               }
-                    wandb.log(metrics)
+                # if self.config.wandb:
+                #     metrics = {"aif_loss": epoch_aif_loss.value,
+                #                "tissue_loss": epoch_tissue_loss.value,
+                #                "residual_loss": epoch_residual_loss.value,
+                #                "lr": self.optimizer.param_groups[0]['lr'],
+                #                }
+                #     wandb.log(metrics)
 
                 iter+=1
 
             # self.forward_complete_check(batch_time, derivative_coordinates)
             self.scheduler.step()
 
-            # TODO check mse for tissue curves
+            # plot mse for tissue curves
 
-            t = torch.from_numpy(data_coordinates[..., :1]).float()
-            xy = torch.from_numpy(data_coordinates[..., 1:]).float()
-            data_curves = torch.from_numpy(data_curves).float()
+            # t = torch.from_numpy(data_coordinates[..., :1]).float()
+            # xy = torch.from_numpy(data_coordinates[..., 1:]).float()
+            # data_curves = torch.from_numpy(data_curves).float()
+            #
+            # with torch.no_grad():
+            #     splits_t, splits_xy = torch.tensor_split(t, 5), torch.tensor_split(xy, 5)
+            #     c_tissue = []
+            #     for ts, xys in zip(splits_t, splits_xy):
+            #         c_tissue.append(self.NN_tissue(ts.to(self.device), xys.to(self.device)))
+            # c_tissue = torch.concat(c_tissue).cpu()
+            # loss_tissue = F.mse_loss(data_curves, c_tissue, reduction='none')
+            # c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
+            # loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
+            # loss_tissue = torch.mean(loss_tissue, dim=1)
+            # result = torch.zeros([512,512,1])
+            # result[self.original_data_indices] = loss_tissue.cpu()
+            #
+            # result_tissue = torch.zeros([512,512,timepoints,1])
+            # result_tissue[self.original_data_indices] = c_tissue.cpu()
+            #
+            # plt.imshow(result, vmin=0, vmax=0.001)
+            # plt.savefig(os.path.join(wandb.run.dir, 'curves', f'mse_case_{case}_sl{slice}_ep{ep}_data.png'),
+            #             dpi=70, bbox_inches='tight')
+            # plt.close()
 
-            with torch.no_grad():
-                splits_t, splits_xy = torch.tensor_split(t, 5), torch.tensor_split(xy, 5)
-                c_tissue = []
-                for ts, xys in zip(splits_t, splits_xy):
-                    c_tissue.append(self.NN_tissue(ts.to(self.device), xys.to(self.device)))
-            c_tissue = torch.concat(c_tissue).cpu()
-            loss_tissue = F.mse_loss(data_curves, c_tissue, reduction='none')
-            c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
-            loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
-            loss_tissue = torch.mean(loss_tissue, dim=1)
-            result = torch.zeros([512,512,1])
-            result[self.original_data_indices] = loss_tissue.cpu()
 
-            result_tissue = torch.zeros([512,512,timepoints,1])
-            result_tissue[self.original_data_indices] = c_tissue.cpu()
-
-            plt.imshow(result, vmin=0, vmax=0.001)
-            plt.savefig(os.path.join(wandb.run.dir, 'curves', f'mse_case_{case}_sl{slice}_ep{ep}_data.png'),
-                        dpi=70, bbox_inches='tight')
-            plt.close()
-
-
-            curves = rearrange(data_curves.cpu(), '(dum1  t ) val -> dum1 (t val)',t=timepoints, val=1)
-            gt_tissue = torch.zeros([512,512,timepoints,1])
-            gt_tissue[self.original_data_indices] = curves.unsqueeze(-1).cpu()
-            time = [x for x in range(timepoints)]
+            # curves = rearrange(data_curves.cpu(), '(dum1  t ) val -> dum1 (t val)',t=timepoints, val=1)
+            # gt_tissue = torch.zeros([512,512,timepoints,1])
+            # gt_tissue[self.original_data_indices] = curves.unsqueeze(-1).cpu()
+            # time = [x for x in range(timepoints)]
 
             # for i in [250, 260,270,290]:
             #     plt.scatter(time, gt_tissue[i,i])
@@ -453,22 +439,22 @@ class PPINN_amc(nn.Module):
             #                 dpi=70, bbox_inches='tight')
             #     plt.close()
 
-            if ep%100==0:
-                plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=timepoints).cpu().detach().numpy()
-                curves_to_plt = np.zeros([*self.original_data_shape, timepoints])
-                curves_to_plt[self.original_data_indices] = plot_curves
+            # if ep%50==0:
+            #     plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=timepoints).cpu().detach().numpy()
+            #     curves_to_plt = np.zeros([*self.original_data_shape, timepoints])
+            #     curves_to_plt[self.original_data_indices] = plot_curves
+            #
+            #     plot_curves_at_epoch_amc_st(data_dict, curves_to_plt, self.device, self.forward_NNs, ep, case, slice,
+            #                                 plot_estimates=True)
 
-                plot_curves_at_epoch_amc_st(data_dict, curves_to_plt, self.device, self.forward_NNs, ep, case, slice,
-                                            plot_estimates=True)
-
-            data_curves = data_curves.cpu().detach().numpy()
-            # if self.config.wandb:
-            #     metrics = {"aif_loss": epoch_aif_loss.avg,
-            #                "tissue_loss": epoch_tissue_loss.avg,
-            #                "residual_loss": epoch_residual_loss.avg,
-            #                "lr": self.optimizer.param_groups[0]['lr'],
-            #                }
-            #     wandb.log(metrics)
+            # data_curves = data_curves.cpu().detach().numpy()
+            if self.config.wandb:
+                metrics = {f"aif_loss_{case}_{slice}": epoch_aif_loss.avg,
+                           f"tissue_loss_{case}_{slice}": epoch_tissue_loss.avg,
+                           f"residual_loss_{case}_{slice}": epoch_residual_loss.avg,
+                           f"lr_{case}_{slice}": self.optimizer.param_groups[0]['lr'],
+                           }
+                wandb.log(metrics)
 
             # if self.epoch % 10 == 0:
             #     data_curves = rearrange(data_curves, ' (dum1 x y t ) val-> (t val) dum1 x y', dum1=1, dum2=1,
@@ -479,25 +465,28 @@ class PPINN_amc(nn.Module):
             #                                     plot_estimates=True)
             #     data_curves = rearrange(data_curves, '(t val) dum1 dum2 x y-> (dum1 dum2 x y t ) val', val=1)
                 # plot_curves_at_epoch_phantom(data_dict, data_curves, self.device, self.forward_NNs, ep, plot_estimates=False)
-            cbf = self.get_cbf(seconds=False).squeeze()
-            mtt = self.get_mtt(seconds=True).squeeze()
-            mtt_min = self.get_mtt(seconds=False).squeeze()
-            delay = self.get_delay(seconds=True).squeeze()
-            cbv = cbf * mtt_min
-            tmax = delay + 0.5 * mtt
 
-            result_dict = {'cbf': cbf,
-                           'cbv': cbv,
-                           'mtt': mtt,
-                           'delay': delay,
-                           'tmax': tmax}
-            # result_dict = drop_unphysical_amc(result_dict)
-            mask_data = data_dict['mask'][slice]
-            mask_data = mask_data.cpu().numpy()
-            for key in result_dict.keys():
-                result_dict[key] = result_dict[key].cpu().detach().numpy()
-                result_dict[key] *= mask_data
-            visualize_amc(case, slice, result_dict, data_dict)
+            # plot intermediate results
+
+            # cbf = self.get_cbf(seconds=False).squeeze()
+            # mtt = self.get_mtt(seconds=True).squeeze()
+            # mtt_min = self.get_mtt(seconds=False).squeeze()
+            # delay = self.get_delay(seconds=True).squeeze()
+            # cbv = cbf * mtt_min
+            # tmax = delay + 0.5 * mtt
+            #
+            # result_dict = {'cbf': cbf,
+            #                'cbv': cbv,
+            #                'mtt': mtt,
+            #                'delay': delay,
+            #                'tmax': tmax}
+            # # result_dict = drop_unphysical_amc(result_dict)
+            # mask_data = data_dict['mask'][slice]
+            # mask_data = mask_data.cpu().numpy()
+            # for key in result_dict.keys():
+            #     result_dict[key] = result_dict[key].cpu().detach().numpy()
+            #     result_dict[key] *= mask_data
+            # visualize_amc(case, slice, result_dict, data_dict)
 
             # if ep > 5:
             #     self.lw_res = 100

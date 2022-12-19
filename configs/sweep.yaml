@@ -1,28 +1,30 @@
-program: main.py
-method: grid
-parameters:
-  sd:
-    values:
-      - 2
-  cbv_ml:
-    values:
-      - 5
-  undersampling:
-    values:
-      - 0.0
-  epochs:
-    values:
-      - 1000
-  lr:
-    values:
-      - 1e-2
-  lw_res:
-    values:
-      - 1
-      - 10
-      - 25
 command:
   - ${env}
   - python
   - ${program}
   - configs\config.json
+method: grid
+parameters:
+  cbv_ml:
+    values:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+  epochs:
+    values:
+      - 1000
+  lr:
+    values:
+      - 0.01
+  lw_res:
+    values:
+      - 25
+  sd:
+    values:
+      - 0
+  undersampling:
+    values:
+      - 0
+program: main.py

@@ -258,6 +258,7 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     # load image data
     image_data_dict = read_nii_folder(ctp_folder)
     dwi_segmentation = sitk.ReadImage(dwi_segmentation)
+    space = dwi_segmentation.GetSpacing()
     # load time matrix
     time_data = np.load(time_matrix)
     # load aif and vof locations
@@ -276,7 +277,7 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     # plt.plot(vof_time_data,vof_data, label='vof')
     # plt.title(str(case)+'')
     # plt.legend()
-    # plt.savefig(str(case)+'.png')
+    # plt.savefig('visuals/'+str(case)+'.png')
     # plt.show()
     # scale aif
     vof_baseline = np.mean(vof_data[:4])
@@ -288,7 +289,7 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     vof_wo_baseline = vof_wo_baseline.clip(min=0)
     # plt.plot(aif_time_data, aif_wo_baseline, label='aif')
     # plt.plot(vof_time_data, vof_wo_baseline, label='vof')
-    # plt.title(str(case)+' nobaseline')
+    # plt.title('visuals/'+ str(case)+' nobaseline')
     # plt.legend()
     # plt.show()
     # now we use simpsons approximation because of irregular timing
@@ -303,20 +304,21 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     # cumsum_aif_scaled = simpson(aif_wo_baseline* ratio, aif_time_data)
     # plt.plot(aif_time_data, aif_wo_baseline* ratio, label='aif')
     # plt.plot(vof_time_data, vof_wo_baseline, label='vof')
-    # plt.title(str(case)+' nobaseline_scaled')
+    # plt.title('visuals/'+str(case)+' nobaseline_scaled')
     # plt.legend()
     # plt.show()
     # print(case, cumsum_aif_scaled, cumsum_vof)
 
     aif_data = aif_wo_baseline * ratio + aif_baseline
-    aif_data += aif_part_nonzero_baseline * ratio
+    # aif_data += aif_part_nonzero_baseline * ratio
 
     # plt.plot(aif_time_data, aif_data, label='aif')
     # plt.plot(vof_time_data,vof_data, label='vof')
     # plt.title(str(case)+' norm')
     # plt.legend()
-    # plt.savefig(str(case)+'_norm_new.png')
+    # plt.savefig('visuals/'+str(case)+'_norm_new.png')
     # plt.show()
+
     image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
     image_data_dict['mip'] = np.max(image_data_dict['array'], axis=0)
 
@@ -332,11 +334,17 @@ def load_data_AMC(gaussian_filter_type, sd=2,
 
     complete_mask[valid_voxels] = 1
     # If smoothing, apply here
+    # plt.imshow(image_data_dict['array'][15,15],vmin=0,vmax=150)
+    # plt.show()
     if gaussian_filter_type:
-        image_data_dict['array'] = apply_gaussian_filter_with_mask(gaussian_filter_type,
+        image_data_dict['array'] = apply_gaussian_filter_with_mask_amc(gaussian_filter_type,
                                                                    image_data_dict['array'].copy(),
                                                                    complete_mask,
-                                                                   sd=sd)
+                                                                   sd=sd,
+                                                                   spacing=space)
+    # plt.imshow(image_data_dict['array'][15, 15], vmin=0, vmax=150)
+    # plt.show()
+
     image_data_dict['array'] = image_data_dict['array'].astype(np.float32)
     image_data_dict['array'] = rearrange(image_data_dict['array'], 't d h w -> d h w t')
 
@@ -502,9 +510,12 @@ def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
     ctp_folder = os.path.join(folder, rf'CTP_nii_registered/{case}/*.nii.gz')
     brainmask = os.path.join(folder, rf'CTP_nii_brainmask/{case}/brainmask.nii.gz')
     dwi_segmentation = os.path.join(folder,  rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
+
     # load image data
     image_data_dict = read_nii_folder(ctp_folder)
     dwi_segmentation = sitk.ReadImage(dwi_segmentation)
+    space = dwi_segmentation.GetSpacing()
+
     # load time matrix
     time_data = np.load(time_matrix)
     # load aif and vof locations
@@ -552,10 +563,11 @@ def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
     complete_mask[valid_voxels] = 1
     # If smoothing, apply here
     if gaussian_filter_type:
-        image_data_dict['array'] = apply_gaussian_filter_with_mask(gaussian_filter_type,
+        image_data_dict['array'] = apply_gaussian_filter_with_mask_amc(gaussian_filter_type,
                                                                    image_data_dict['array'].copy(),
                                                                    complete_mask,
-                                                                   sd=sd)
+                                                                   sd=sd,
+                                                                   spacing=space)
     image_data_dict['array'] = image_data_dict['array'].astype(np.float32)
     image_data_dict['array'] = rearrange(image_data_dict['array'], 't d h w -> d h w t')
 
@@ -770,6 +782,28 @@ def apply_gaussian_filter_with_mask(type, array, mask, sd):
         else:
             raise NotImplementedError('Gaussian filter variant not implemented.')
 
+def apply_gaussian_filter_with_mask_amc(type, array, mask, sd, spacing):
+    [dx, dy, dz] = spacing
+    sd_z = (dx * sd) / dz
+    truncate = np.ceil(2 * sd) / sd if sd != 0 else 0
+    mask = np.expand_dims(mask, 0)
+    mask = np.repeat(mask, array.shape[0], axis=0)
+    if len(array.shape) == 4:
+        if type == 'gauss_spatiotemporal':
+            filtered = gaussian(array * mask, sigma=(sd, sd_z, sd, sd), mode='nearest', truncate=truncate)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                filtered /= gaussian(mask, sigma=(sd, sd_z, sd, sd), mode='nearest', truncate=truncate)
+            filtered[np.logical_not(mask)] = 0
+            return filtered
+        elif type == 'gauss_spatial':
+            filtered = gaussian(array * mask, sigma=(0, sd_z, sd, sd), mode='nearest', truncate=truncate)
+            # intermed = gaussian(mask, sigma=(0, sd, sd, sd), mode='nearest', truncate=truncate)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                filtered /= gaussian(mask, sigma=(0, sd_z, sd, sd), mode='nearest', truncate=truncate)
+            filtered[np.logical_not(mask)] = 0
+            return filtered
+        else:
+            raise NotImplementedError('Gaussian filter variant not implemented.')
 
 def apply_billateral_filter(array, mask, sigma_spatial):
     mask = np.expand_dims(mask, 1)
