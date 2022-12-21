@@ -243,6 +243,8 @@ class PPINN_amc(nn.Module):
             epoch_aif_loss = AverageMeter()
             epoch_tissue_loss = AverageMeter()
             epoch_residual_loss = AverageMeter()
+
+
             for batch_collopoints in collopoints_dataloader:
                 batch_time = data_time
                 batch_aif_time = data_aif_time
@@ -325,6 +327,11 @@ class PPINN_amc(nn.Module):
             c_aif, c_tissue = self.forward_NNs(batch_time, batch_aif_time)
             loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
             loss += self.lw_data * (loss_aif + self.lw_curves*loss_tissue)
+        # if self.lw_res:
+        #     # compute residual loss
+        #     c_aif, c_tissue, residual = self.forward_complete(batch_collopoints)
+        #     loss_residual = self.__loss_residual(residual)
+        #     loss += self.lw_res * loss_residual
         if self.lw_res:
             # compute residual loss
             c_aif, c_tissue, residual = self.forward_complete(batch_collopoints)
@@ -381,6 +388,45 @@ class PPINN_amc(nn.Module):
         loss_r = torch.mean(torch.square(residual))
         return loss_r
 
+    # def __loss_residual(self, residual):
+    #     inter = torch.mean(torch.square(residual), dim=-1)
+    #     delays = self.get_delay()[..., 0, 0]
+    #
+    #     delayed_voxels = delays > 1.5
+    #     healthy_voxels = delays <= 1.5
+    #
+    #     loss_delayed = torch.mean(inter[delayed_voxels])
+    #     loss_healthy = torch.mean(inter[healthy_voxels])
+    #
+    #     if torch.isnan(loss_delayed):
+    #         loss_delayed = torch.as_tensor(0.).to(self.device)
+    #     if torch.isnan(loss_healthy):
+    #         loss_healthy = torch.as_tensor(0.).to(self.device)
+    #
+    #     return 0.5*loss_delayed + 0.5*loss_healthy
+    # def __loss_residual(self, residual):
+    #     inter = torch.mean(torch.square(residual), dim=-1)
+    #
+    #     loss_high = torch.mean(inter[inter<=torch.quantile(inter, 0.33, dim=1)])
+    #     loss_med = torch.mean(inter[(inter<torch.quantile(inter, 0.66, dim=1)) & (inter>torch.quantile(inter, 0.33, dim=1))])
+    #     loss_low = torch.mean(inter[inter>=torch.quantile(inter, 0.66, dim=1)])
+    #
+    #     return loss_high + loss_med + loss_low
+    # def __loss_residual(self, residual):
+    #     inter = torch.mean(torch.square(residual), dim=-1)
+    #     loss_1= torch.mean(inter[inter<=torch.quantile(inter, 0.1, dim=1)])
+    #     loss_2 = torch.mean(inter[(inter>torch.quantile(inter, 0.1, dim=1)) & (inter<=torch.quantile(inter, 0.2, dim=1))])
+    #     loss_3 = torch.mean(inter[(inter>torch.quantile(inter, 0.2, dim=1)) & (inter<=torch.quantile(inter, 0.3, dim=1))])
+    #     loss_4 = torch.mean(inter[(inter>torch.quantile(inter, 0.3, dim=1)) & (inter<=torch.quantile(inter, 0.4, dim=1))])
+    #     loss_5 = torch.mean(inter[(inter>torch.quantile(inter, 0.4, dim=1)) & (inter<=torch.quantile(inter, 0.5, dim=1))])
+    #
+    #     loss_6 = torch.mean(inter[(inter>torch.quantile(inter, 0.5, dim=1)) & (inter<=torch.quantile(inter, 0.6, dim=1))])
+    #     loss_7 = torch.mean(inter[(inter>torch.quantile(inter, 0.6, dim=1)) & (inter<=torch.quantile(inter, 0.7, dim=1))])
+    #     loss_8 = torch.mean(inter[(inter>torch.quantile(inter, 0.7, dim=1)) & (inter<=torch.quantile(inter, 0.8, dim=1))])
+    #     loss_9 = torch.mean(inter[(inter>torch.quantile(inter, 0.8, dim=1)) & (inter<=torch.quantile(inter, 0.9, dim=1))])
+    #     loss_10 = torch.mean(inter[inter>torch.quantile(inter, 0.9, dim=1)])
+    #     return 0.5*(0.33*loss_8 + 0.33*loss_9 + 0.33*loss_10) + 0.5*torch.mean(torch.square(residual))
+    #     return 0.1*loss_1 + 0.1*loss_2 + 0.1*loss_3 + 0.1*loss_4 + 0.1*loss_5 + 0.1*loss_6 + 0.1*loss_7 + 0.1*loss_8 + 0.1*loss_9 + 0.1*loss_9 + 0.1*loss_10
     def __loss_bc(self, output):
         _, _, _, _, _ = output
         # TODO implement

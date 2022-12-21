@@ -6,18 +6,16 @@ parameters:
       - 'AMCCTP'
   epochs:
     values:
-      - 25
+      - 100
   sd:
     values:
       - 4
   lr:
     values:
       - 1e-2
-      - 1e-3
-      - 1e-4
   lw_res:
     values:
-      - 25
+      - 50
 command:
   - ${env}
   - python

@@ -12,6 +12,9 @@ import wandb
 from scipy.integrate import simpson
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
+
+
+
 def load_data(gaussian_filter_type, sd=2.5,
               folder=r'data/DigitalPhantomCT',
               cbv_ml=5, simulation_method=2,
@@ -249,6 +252,41 @@ def load_data_ISLES(filter_type, sd=2.5,
 def load_data_AMC(gaussian_filter_type, sd=2,
                     folder=r'D:/PPINN_patient_data/AMCCTP',
                     case='C102'):
+    sygno_peaks = {
+        'C102': 346,
+        'C103': 421,
+        'C104': 389,
+        'C105': 228,
+        'C106': 458,
+        'C107': 223,
+        'C108': 244,
+        'C109': 143,
+        'C110': 412,
+        'C111': 651,
+        'C112': 173,
+        'C113': 581,
+        'C114': 331,
+        'C115': 373,
+        'C116': 234,
+    }
+    sygno_base = {
+        'C102': -1.28,
+        'C103': 6.44,
+        'C104': 3.69,
+        'C105': 0.25,
+        'C106': 16.13,
+        'C107': 0.40,
+        'C108': -2.30,
+        'C109': -1.22,
+        'C110': -1.72,
+        'C111': -0.37,
+        'C112': -1.45,
+        'C113': 7.14,
+        'C114': -0.60,
+        'C115': 0.08,
+        'C116': 0.25,
+    }
+
     aif_location = os.path.join(folder, rf'AIF_annotations/{case}/aif.nii.gz')
     vof_location = os.path.join(folder, rf'VOF_annotations/{case}/vof.nii.gz')
     time_matrix = os.path.join(folder, rf'CTP_time_matrix/{case}/matrix.npy')
@@ -273,34 +311,35 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     vof_data = np.sum(np.multiply(vof_location, image_data_dict['array']), axis=(1,2,3)) / np.sum(vof_location)
     aif_time_data = time_data[time_aif_location]
     vof_time_data = time_data[time_vof_location]
-    # plt.plot(aif_time_data, aif_data, label='aif')
-    # plt.plot(vof_time_data,vof_data, label='vof')
-    # plt.title(str(case)+'')
-    # plt.legend()
-    # plt.savefig('visuals/'+str(case)+'.png')
-    # plt.show()
-    # scale aif
-    vof_baseline = np.mean(vof_data[:4])
-    aif_baseline = np.mean(aif_data[:4])
+
+    sd_t=2
+    truncate = np.ceil(2 * sd_t) / sd_t if sd_t != 0 else 0
+    aif_data = gaussian(aif_data, sigma=(sd_t), mode='nearest', truncate=truncate)
+    aif_baseline = aif_data[0]
+
     aif_wo_baseline = aif_data - aif_baseline
-    aif_part_nonzero_baseline = aif_wo_baseline.clip(max=0)
-    aif_wo_baseline = aif_wo_baseline.clip(min=0)
-    vof_wo_baseline = vof_data - vof_baseline
-    vof_wo_baseline = vof_wo_baseline.clip(min=0)
+    max_aif_heigt = np.max(aif_wo_baseline)
+    aif_wo_baseline *= (sygno_peaks[case]-sygno_base[case])/max_aif_heigt
+    aif_data = aif_wo_baseline + sygno_base[case]
+    print(np.max(aif_data), aif_data[0])
+    # aif_part_nonzero_baseline = aif_wo_baseline.clip(max=0)
+    # aif_wo_baseline = aif_wo_baseline.clip(min=0)
+    # vof_wo_baseline = vof_data - vof_baseline
+    # vof_wo_baseline = vof_wo_baseline.clip(min=0)
     # plt.plot(aif_time_data, aif_wo_baseline, label='aif')
     # plt.plot(vof_time_data, vof_wo_baseline, label='vof')
     # plt.title('visuals/'+ str(case)+' nobaseline')
     # plt.legend()
     # plt.show()
     # now we use simpsons approximation because of irregular timing
-    cumsum_aif = simpson(aif_wo_baseline, aif_time_data)
-    cumsum_vof = simpson(vof_wo_baseline, vof_time_data)
+    # cumsum_aif = simpson(aif_wo_baseline, aif_time_data)
+    # cumsum_vof = simpson(vof_wo_baseline, vof_time_data)
     # print(case, cumsum_aif, cumsum_vof)
     # print(aif_wo_baseline)
     # print(vof_wo_baseline)
     # cumsum_aif = np.cumsum(aif_wo_baseline)[-1]
     # cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
-    ratio = cumsum_vof / cumsum_aif
+    # ratio = cumsum_vof / cumsum_aif
     # cumsum_aif_scaled = simpson(aif_wo_baseline* ratio, aif_time_data)
     # plt.plot(aif_time_data, aif_wo_baseline* ratio, label='aif')
     # plt.plot(vof_time_data, vof_wo_baseline, label='vof')
@@ -309,7 +348,10 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     # plt.show()
     # print(case, cumsum_aif_scaled, cumsum_vof)
 
-    aif_data = aif_wo_baseline * ratio + aif_baseline
+    # aif_data = aif_wo_baseline * ratio + aif_baseline
+
+
+
     # aif_data += aif_part_nonzero_baseline * ratio
 
     # plt.plot(aif_time_data, aif_data, label='aif')
@@ -318,6 +360,7 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     # plt.legend()
     # plt.savefig('visuals/'+str(case)+'_norm_new.png')
     # plt.show()
+
 
     image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
     image_data_dict['mip'] = np.max(image_data_dict['array'], axis=0)
@@ -333,21 +376,19 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     valid_voxels = np.where((brainmask_data == 1) & (tissuemask == 1) & (vesselmask == 0))
 
     complete_mask[valid_voxels] = 1
-    # If smoothing, apply here
-    # plt.imshow(image_data_dict['array'][15,15],vmin=0,vmax=150)
-    # plt.show()
+
+    tac_baseline = np.mean(image_data_dict['array'][:4], axis=0, keepdims=True)
+    image_data_dict['array'] = image_data_dict['array'] - tac_baseline
+
     if gaussian_filter_type:
         image_data_dict['array'] = apply_gaussian_filter_with_mask_amc(gaussian_filter_type,
                                                                    image_data_dict['array'].copy(),
                                                                    complete_mask,
                                                                    sd=sd,
                                                                    spacing=space)
-    # plt.imshow(image_data_dict['array'][15, 15], vmin=0, vmax=150)
-    # plt.show()
 
     image_data_dict['array'] = image_data_dict['array'].astype(np.float32)
     image_data_dict['array'] = rearrange(image_data_dict['array'], 't d h w -> d h w t')
-
 
     data_dict = {'aif': aif_data,
                  'vof': vof_data,

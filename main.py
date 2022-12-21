@@ -90,7 +90,7 @@ def train(config):
 
 def train_amc(config):
     cases = os.listdir(r'D:/PPINN_patient_data/AMCCTP/CTP_nii_registered')
-    for case in tqdm(cases[:1]):
+    for case in tqdm(cases[1:]):
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_AMC(gaussian_filter_type=config.filter_type,
                                              sd=config.sd,
@@ -104,7 +104,7 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(15,16)):
+        for slice in tqdm(range(slices)):
             mask_data = data_dict['mask'][slice]
             valid_voxels = torch.where(mask_data == 1)
 
