@@ -1,0 +1,97 @@
+def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
+                    folder=r'D:/PPINN_patient_data/AMCCTP',
+                    case='C102'):
+    aif_location = os.path.join(folder, rf'AIF_annotations/{case}/aif.nii.gz')
+    vof_location = os.path.join(folder, rf'VOF_annotations/{case}/vof.nii.gz')
+    time_matrix = os.path.join(folder, rf'CTP_time_matrix/{case}/matrix.npy')
+    ctp_folder = os.path.join(folder, rf'CTP_nii_registered/{case}/*.nii.gz')
+    brainmask = os.path.join(folder, rf'CTP_nii_brainmask/{case}/brainmask.nii.gz')
+    dwi_segmentation = os.path.join(folder,  rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
+
+    # load image data
+    image_data_dict = read_nii_folder(ctp_folder)
+    dwi_segmentation = sitk.ReadImage(dwi_segmentation)
+    space = dwi_segmentation.GetSpacing()
+
+    # load time matrix
+    time_data = np.load(time_matrix)
+    # load aif and vof locations
+    aif_location = sitk.GetArrayFromImage(sitk.ReadImage(aif_location))
+    vof_location = sitk.GetArrayFromImage(sitk.ReadImage(vof_location))
+    time_aif_location = list(set(np.where(aif_location == 1)[0]))[0]
+    time_vof_location = list(set(np.where(vof_location == 1)[0]))[0]
+    # load brainmask
+    brainmask_data = sitk.GetArrayFromImage(sitk.ReadImage(brainmask))
+    # get aif and vof data
+    aif_data = np.sum(np.multiply(aif_location, image_data_dict['array']), axis=(1,2,3)) / np.sum(aif_location)
+    vof_data = np.sum(np.multiply(vof_location, image_data_dict['array']), axis=(1,2,3)) / np.sum(vof_location)
+    aif_time_data = time_data[time_aif_location]
+    vof_time_data = time_data[time_vof_location]
+
+    # scale aif
+    vof_baseline = np.mean(vof_data[:4])
+    aif_baseline = np.mean(aif_data[:4])
+    aif_wo_baseline = aif_data - aif_baseline
+    aif_part_nonzero_baseline = aif_wo_baseline.clip(max=0)
+    aif_wo_baseline = aif_wo_baseline.clip(min=0)
+    vof_wo_baseline = vof_data - vof_baseline
+    # now we use simpsons approximation because of irregular timing
+    cumsum_aif = simpson(aif_wo_baseline, aif_time_data)
+    cumsum_vof = simpson(vof_wo_baseline, vof_time_data)
+    # cumsum_aif = np.cumsum(aif_wo_baseline)[-1]
+    # cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
+    ratio = cumsum_vof / cumsum_aif
+    aif_data = aif_wo_baseline * ratio + aif_baseline
+    aif_data += aif_part_nonzero_baseline * ratio
+
+    image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
+    image_data_dict['mip'] = np.max(image_data_dict['array'], axis=0)
+
+    vesselmask = np.zeros_like(image_data_dict['mip'])
+    vesselmask[image_data_dict['mip']>150] = 1
+
+    tissuemask = np.zeros_like(image_data_dict['mip'])
+    image_data_avg = np.mean(image_data_dict['array'][:4,...], axis=0)
+    tissuemask[(image_data_avg > 30) & (image_data_avg < 100)] = 1
+
+    complete_mask = np.zeros_like(image_data_dict['mip'])
+    valid_voxels = np.where((brainmask_data == 1) & (tissuemask == 1) & (vesselmask == 0))
+
+    complete_mask[valid_voxels] = 1
+    # If smoothing, apply here
+    if gaussian_filter_type:
+        image_data_dict['array'] = apply_gaussian_filter_with_mask_amc(gaussian_filter_type,
+                                                                   image_data_dict['array'].copy(),
+                                                                   complete_mask,
+                                                                   sd=sd,
+                                                                   spacing=space)
+    image_data_dict['array'] = image_data_dict['array'].astype(np.float32)
+    image_data_dict['array'] = rearrange(image_data_dict['array'], 't d h w -> d h w t')
+
+
+    data_dict = {'aif': aif_data,
+                 'vof': vof_data,
+                 'time': time_data,
+                 'curves': image_data_dict['array'],
+                 'brainmask': brainmask_data,
+                 'mip': image_data_dict['mip'],
+                 'mask': complete_mask,
+                 }
+
+
+    # create meshes
+    data_dict = normalize_data(data_dict)
+    data_dict = get_coll_points(data_dict)
+    data_dict['time'] = np.tile(
+        data_dict['time'][..., np.newaxis, np.newaxis, np.newaxis],
+        (1, 512, 512, 1),
+    ).astype(np.float32)
+    data_dict['time_inference_highres'] = np.tile(
+        data_dict['time_inference_highres'][..., np.newaxis, np.newaxis, np.newaxis],
+        (1, 512, 512, 1),
+    ).astype(np.float32)
+    data_dict = create_mesh_amc(data_dict)
+    data_dict = get_tensors(data_dict)
+    data_dict['aif_time'] = data_dict['time'][time_aif_location]
+    data_dict['dwi_segmentation'] = dwi_segmentation
+    return data_dict

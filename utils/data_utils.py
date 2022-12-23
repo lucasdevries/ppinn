@@ -321,7 +321,7 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     max_aif_heigt = np.max(aif_wo_baseline)
     aif_wo_baseline *= (sygno_peaks[case]-sygno_base[case])/max_aif_heigt
     aif_data = aif_wo_baseline + sygno_base[case]
-    print(np.max(aif_data), aif_data[0])
+
     # aif_part_nonzero_baseline = aif_wo_baseline.clip(max=0)
     # aif_wo_baseline = aif_wo_baseline.clip(min=0)
     # vof_wo_baseline = vof_data - vof_baseline
