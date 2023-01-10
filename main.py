@@ -90,7 +90,7 @@ def train(config):
 
 def train_amc(config):
     cases = os.listdir(r'D:/PPINN_patient_data/AMCCTP/CTP_nii_registered')
-    for case in tqdm(cases[1:]):
+    for case in tqdm(cases[:1]):
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_AMC(gaussian_filter_type=config.filter_type,
                                              sd=config.sd,
@@ -142,6 +142,7 @@ def train_amc(config):
             result_dict['mtt'] = result_dict['mtt'].cpu().detach().numpy()
             result_dict['delay'] = result_dict['delay'].cpu().detach().numpy()
             result_dict['tmax'] = result_dict['tmax'].cpu().detach().numpy()
+
             visualize_amc(case, slice, result_dict, data_dict)
             # visualize_amc_sygno(case, slice, sygnovia_results, data_dict)
 

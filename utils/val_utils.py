@@ -874,7 +874,13 @@ def drop_unphysical_amc(results):
     results['delay'] = np.clip(results['delay'], a_min=0 , a_max=10)
     results['tmax'] = np.clip(results['tmax'], a_min=0 , a_max=20)
     return results
-
+def drop_unphysical_amc2(results):
+    results['cbf'] = np.clip(results['cbf'], a_min=0 , a_max=1000)
+    results['cbv'] = np.clip(results['cbv'], a_min=0, a_max=20)
+    results['mtt'] = np.clip(results['mtt'], a_min=0 , a_max=50)
+    results['delay'] = np.clip(results['delay'], a_min=0 , a_max=20)
+    results['tmax'] = np.clip(results['tmax'], a_min=0 , a_max=50)
+    return results
 def plot_results(results, corrected=False):
     plt.rcParams["font.family"] = "serif"
     plt.rcParams["axes.linewidth"] = 1.5
@@ -958,14 +964,13 @@ def plot_curves_at_epoch(data_dict, data_curves, device, forward_NNs, ep, case, 
             'size': 24,
             }
     for i in range(6, 6 * 200 + 50, 50):
-        if np.min(data_curves[0, 3000 + i, 0].cpu().detach().numpy()) < 0:
-            continue
         plt.figure(figsize=(5, 5))
         time = data_dict['time'][slice] * data_dict['std_t'] + data_dict['mean_t']
         time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
         if plot_estimates:
             plt.plot(time_hr, tac_inf[0,3000+i,0].cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
         plt.scatter(time, data_curves[0, 3000 + i, 0].cpu().detach().numpy(), c='k', label=r'obs. data')
+        plt.ylim(0, 0.20)
         plt.xticks([])
         plt.yticks([])
         plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))
@@ -976,6 +981,7 @@ def plot_curves_at_epoch(data_dict, data_curves, device, forward_NNs, ep, case, 
         else:
             plt.savefig(os.path.join(wandb.run.dir, f'tac_case_{case}_{i}_sl{slice}_ep{ep}_data.png'), dpi=150, bbox_inches='tight')
         plt.close()  #
+
     plt.figure(figsize=(5, 5))
     time_hr = data_dict['time_inference_highres'] * data_dict['std_t'] + data_dict['mean_t']
     time_aif = data_dict['aif_time'] * data_dict['std_t'] + data_dict['mean_t']
@@ -1093,7 +1099,7 @@ def plot_curves_at_epoch_amc_st(data_dict, data_curves, device, forward_NNs, ep,
     time_aif = data_time_inf[0,0,:, :1]
 
     with torch.no_grad():
-        splits_txy = torch.tensor_split(data_time_inf, 5)
+        splits_txy = torch.tensor_split(data_time_inf, 20)
 
         c_tissue = []
         for txys in splits_txy:
@@ -1136,7 +1142,8 @@ def plot_curves_at_epoch_amc_st(data_dict, data_curves, device, forward_NNs, ep,
         plt.close()  #
     plt.figure(figsize=(5, 5))
     if plot_estimates:
-        plt.plot(aif_inf.cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
+        plt.plot(time_aif.cpu().detach().numpy(), aif_inf.cpu().detach().numpy(), c='k', label=r'$f_{TAC}(t, \theta)$')
+    plt.scatter(data_dict['aif_time'][:,0,0].cpu().detach().numpy(), data_dict['aif'].cpu().detach().numpy())
     plt.xticks([])
     plt.yticks([])
     plt.legend(prop={'size': 20}, loc='center left', bbox_to_anchor=(1, 0.5))

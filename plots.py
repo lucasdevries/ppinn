@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import pickle
 import numpy as np
-import os
+import os, glob
 from utils.val_utils import drop_edges, drop_unphysical, drop_edges_per_method, drop_unphysical_per_method
 from utils.val_utils import load_sygnovia_results, load_nlr_results, load_phantom_gt, load_sygnovia_results_amc
 from utils.plot_utils import bland_altman_plot
@@ -12,7 +12,7 @@ import SimpleITK as sitk
 from einops.einops import rearrange, repeat
 from tqdm import tqdm
 import pandas as pd
-
+from matplotlib import cm
 font = {'family': 'serif',
         'color': 'black',
         'weight': 'normal',
@@ -884,6 +884,100 @@ def make_phantom_plot():
 
     print('hi')
 
+def make_drop_plot(sd, undersample=False, param='cbf'):
+
+    results_drop = {'gt': get_data(load_phantom_gt, sd=None, undersample=False, drop=True),
+               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample, drop=True),
+               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample, drop=True),
+               }
+
+    results = {'gt': get_data(load_phantom_gt, sd=None, undersample=False, drop=False),
+               'nlr': get_data(load_nlr_results, sd=sd, undersample=undersample, drop=False),
+               'ppinn': get_data(load_ppinn_results, sd=sd, undersample=undersample, drop=False),
+               }
+
+    min_vals = {'cbf': 0, 'mtt': 0, 'cbv': 0, 'delay': 0, 'tmax': 0}
+    max_vals = {'cbf': 150, 'mtt': 28, 'cbv': 6, 'delay': 3.5, 'tmax': 15}
+    title = {'gt': 'GT', 'sygnovia': 'Sygno.via', 'nlr': 'NLR', 'ppinn': 'PPINN', 'sppinn': 'SPPINN'}
+    param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
+    param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
+
+    fig = plt.figure(figsize=(5, 6))
+    jet_c = cm.get_cmap('jet').copy()
+    jet_c.set_over(color='k')
+    outer = gridspec.GridSpec(1, 4, wspace=0.2, hspace=0.1)
+    method = ['nlr', 'nlr', 'ppinn', 'ppinn']
+    for i in range(4):
+        ax = plt.Subplot(fig, outer[i])
+        if i in [1,3]:
+            print('drop')
+            ax.imshow(results_drop[method[i]][param], cmap=jet_c, vmin=min_vals[param], vmax=max_vals[param])
+            ax.set_title(f'clipped\n{title[method[i]]}', size=12)
+        else:
+            print('nromal')
+            ax.imshow(results[method[i]][param], cmap=jet_c, vmin=min_vals[param], vmax=max_vals[param])
+            ax.set_title(f'{title[method[i]]}', size=12)
+
+        ax.set_xticks([])
+        ax.set_yticks([])
+        fig.add_subplot(ax)
+        if i == 3:
+            norm = mpl.colors.Normalize(vmin=min_vals[param], vmax=max_vals[param])
+            cax = inset_axes(
+                ax,
+                width="20%",
+                height="100%",
+                bbox_to_anchor=(0.5, 0, 1, 1),
+                bbox_transform=ax.transAxes,
+                loc="right",
+            )
+            cb1 = mpl.colorbar.ColorbarBase(cax, cmap=jet_c, norm=norm, orientation='vertical', extend='max')
+            cb1.outline.set_color('black',)
+            cb1.set_label(param_unts[param], fontdict=font)
+
+            #
+            # ax.set_xticks([])
+            # ax.set_yticks([])
+            # ax.set_axis_off()
+
+    name = f'visuals/drop_phantom_results_sd_{sd}_us_{str(undersample)}.png'
+    plt.savefig(name, dpi=150, bbox_inches='tight')
+    fig.show()
+
+def plot_phantom_example(slice, crop=False):
+    file = glob.glob(r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\DigitalPhantomCT\*")[slice-1]
+    sitk_img = sitk.ReadImage(file)
+    array = sitk.GetArrayFromImage(sitk_img)[0]
+    if crop:
+        simulated_data_size = 32 * 7
+        scan_center = 512 // 2
+        simulated_data_start = scan_center - simulated_data_size // 2
+        simulated_data_end = scan_center + simulated_data_size // 2
+        array = array[simulated_data_start:simulated_data_end, simulated_data_start:simulated_data_end]
+    fig, ax = plt.subplots(1,1,figsize=(6.5, 6.5))
+    ax.imshow(array, vmin=0, vmax=100, cmap='Greys_r')
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_axis_off()
+    plt.savefig(f'visuals/phantom_slice_{slice}_{crop}.png', dpi=150, bbox_inches='tight')
+    plt.show()
+
+def plot_aif():
+    data = load_phantom()
+    xs = [15, 200, 150]
+    ys = [222, 20, 90]
+    col = ['k', 'slategrey', 'silver']
+
+    fig, ax = plt.subplots(1,1,figsize=(2.0, 2))
+    ax.plot(data['time'], data['aif'], label=r'$C_{AIF}(t)$', c='firebrick', lw=1.5)
+    ax.set_ylim(20, 300)
+    ax.legend(frameon=False, prop={'size': 10})
+    ax.set_xlabel(r'[s]', fontdict=font)
+    ax.set_ylabel(r'[HU]', fontdict=font)
+    # ax[1].set_ylabel(r'[HU]', fontdict=font)
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    plt.savefig('visuals/aif_phantom.png', dpi=150, bbox_inches='tight')
+    plt.show()
 
 if __name__ == '__main__':
     # make_ba_plots(sd=2, drop=True)
@@ -913,8 +1007,13 @@ if __name__ == '__main__':
     # make_grid_plot_sppinn(sd=2, drop=True, undersample=False)
     # make_grid_plot_sppinn(sd=0, drop=True, undersample=False)
 
-    plot_sv_vs_ppinn()
+    # plot_sv_vs_ppinn()
     # plot_ppinn_maps('C114', slice=11)
     # make_sd_plot(drop=True)
     # make_undersample_plot(drop=True)
     # make_cbv_plot(drop=True)
+    # make_drop_plot(sd=2)
+    plot_aif()
+    plot_phantom_example(176)
+    plot_phantom_example(176, crop=True)
+    plot_phantom_example(177)

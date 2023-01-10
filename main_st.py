@@ -8,7 +8,8 @@ import numpy as np
 import argparse
 from tqdm import tqdm
 from utils.val_utils import visualize, visualize_amc, load_sygnovia_results, load_nlr_results, load_phantom_gt, load_sygnovia_results_amc
-from utils.val_utils import log_software_results, plot_results, drop_edges, drop_unphysical, drop_unphysical_amc, visualize_amc_sygno
+from utils.val_utils import log_software_results, plot_results, drop_edges, drop_unphysical, drop_unphysical_amc, visualize_amc_sygno, drop_unphysical_amc2
+
 import matplotlib.pyplot as plt
 import torch
 
@@ -91,6 +92,7 @@ def train(config):
 def train_amc(config):
     cases = os.listdir(r'D:/PPINN_patient_data/AMCCTP/CTP_nii_registered')
     for case in tqdm(cases[:1]):
+
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_AMC_spatiotemporal(gaussian_filter_type=config.filter_type,
                                              sd=config.sd,
@@ -105,7 +107,8 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(15,16)):
+        for slice in tqdm(range(18,19)):
+            train_utils.set_seed(config['seed'])
             mask_data = data_dict['mask'][slice]
             valid_voxels = torch.where(mask_data == 1)
             shape_in = torch.Size([1, len(valid_voxels[0]), 1])
@@ -130,12 +133,13 @@ def train_amc(config):
                                     epochs=int(config.epochs),
                                     case=case)
 
-            # result_dict = drop_unphysical_amc(result_dict)
             #
             mask_data = mask_data.cpu().numpy()
             for key in result_dict.keys():
                 result_dict[key] = result_dict[key].cpu().detach().numpy()
                 result_dict[key] *= mask_data
+
+            result_dict = drop_unphysical_amc2(result_dict)
 
             cbf_results[slice, ...] = result_dict['cbf']
             cbv_results[slice, ...] = result_dict['cbv']

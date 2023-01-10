@@ -4,12 +4,28 @@ parameters:
   siren:
     values:
       - true
+  siren_w0:
+    values:
+      - 30
   hidden_tissue:
     values:
-      - 32
+      - 256
+  lr:
+    values:
+      - 5e-3
+      - 5e-4
+  sd:
+    values:
+      - 4
   epochs:
     values:
       - 300
+  lw_res:
+    values:
+      - 70
+  batch_size:
+    values:
+      - 5000
 command:
   - ${env}
   - python

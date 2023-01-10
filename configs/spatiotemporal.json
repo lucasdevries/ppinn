@@ -23,7 +23,7 @@
   "siren_w0": 30,
   "epochs": 300,
   "filter_type": "gauss_spatial",
-  "sd": 2,
+  "sd": 4,
   "plot_params_every": 1,
   "delay_type": "learned",
   "cbf_type": "learned",

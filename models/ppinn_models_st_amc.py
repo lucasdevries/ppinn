@@ -46,6 +46,8 @@ class PPINN_amc(nn.Module):
         self.optimizer = None
         self.scheduler = None
         self.milestones = [self.config.epochs//3, 2*self.config.epochs//3]
+        # self.milestones = [3*self.config.epochs]
+
         self.interpolator = None
         self.var_list = None
         self.shape_in = shape_in
@@ -89,7 +91,7 @@ class PPINN_amc(nn.Module):
                                 )
             self.NN_ode = MLP_ODE_siren(
                                             dim_in=2,  # input dimension, ex. 2d coor
-                                            dim_hidden=16,  # hidden dimension
+                                            dim_hidden=16,  # hidden dimension normal 16
                                             dim_out=3,  # output dimension, ex. rgb value
                                             num_layers=3,  # number of layers
                                             final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
@@ -117,7 +119,6 @@ class PPINN_amc(nn.Module):
                 bn=bn,
                 act='tanh'
             )
-
 
 
         self.NN_aif = MLP(
@@ -227,9 +228,6 @@ class PPINN_amc(nn.Module):
                 param.data = torch.log(param.data) if self.log_domain else param.data
 
     def get_ode_params(self):
-        # data_coordinates_xy = rearrange(self.data_coordinates_xy, 'dum1 dum2 x y val-> (dum1 dum2 x y) val')
-        # ones = torch.ones([512,512])
-        # ones[self.original_data_indices] = 0
 
         params = self.NN_ode(self.data_coordinates_xy)
 
@@ -284,11 +282,13 @@ class PPINN_amc(nn.Module):
 
         data_time = data_dict['time'][slice]
         data_aif = data_dict['aif']
+        data_aif_time = data_dict['aif_time'].to(self.device)
         data_curves = data_dict['curves'][slice].numpy()
         data_curves = data_curves[self.original_data_indices]
         data_coordinates = data_dict['coordinates'][slice].numpy()
         data_coordinates = data_coordinates[self.original_data_indices]
         timepoints = len(data_dict['aif'])
+
         # data_indices = rearrange(data_dict['indices'][slice], 't dim1 dim2 vals -> dim1 dim2 vals t')[self.original_data_indices]
         # data_indices = rearrange(data_indices, ' dim1 vals t -> dim1 t vals')
 
@@ -364,13 +364,16 @@ class PPINN_amc(nn.Module):
 
                 batch_aif = data_aif.to(self.device)
                 batch_time = data_time[:, 0, 0, :].to(self.device)
+                batch_aif_time = data_aif_time[:, 0, 0, :].to(self.device)
                 batch_boundary = data_boundary.to(self.device)
+
                 loss_aif, loss_tissue, loss_residual = self.optimize(batch_time,
                                                                      batch_coordinates,
                                                                      batch_aif,
                                                                      batch_curves,
                                                                      batch_boundary,
-                                                                     batch_collo
+                                                                     batch_collo,
+                                                                     batch_aif_time
                                                                      )
                 epoch_aif_loss.update(loss_aif.item())
                 epoch_tissue_loss.update(loss_tissue.item())
@@ -399,10 +402,10 @@ class PPINN_amc(nn.Module):
             self.scheduler.step()
 
             # plot mse for tissue curves
-
+            #
             # t = torch.from_numpy(data_coordinates[..., :1]).float()
             # xy = torch.from_numpy(data_coordinates[..., 1:]).float()
-            # data_curves = torch.from_numpy(data_curves).float()
+            # data_curveplot = torch.from_numpy(data_curves).float()
             #
             # with torch.no_grad():
             #     splits_t, splits_xy = torch.tensor_split(t, 5), torch.tensor_split(xy, 5)
@@ -410,7 +413,7 @@ class PPINN_amc(nn.Module):
             #     for ts, xys in zip(splits_t, splits_xy):
             #         c_tissue.append(self.NN_tissue(ts.to(self.device), xys.to(self.device)))
             # c_tissue = torch.concat(c_tissue).cpu()
-            # loss_tissue = F.mse_loss(data_curves, c_tissue, reduction='none')
+            # loss_tissue = F.mse_loss(data_curveplot, c_tissue, reduction='none')
             # c_tissue = rearrange(c_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
             # loss_tissue = rearrange(loss_tissue, '(dum1 t ) val -> dum1 t val', t=timepoints)
             # loss_tissue = torch.mean(loss_tissue, dim=1)
@@ -421,7 +424,7 @@ class PPINN_amc(nn.Module):
             # result_tissue[self.original_data_indices] = c_tissue.cpu()
             #
             # plt.imshow(result, vmin=0, vmax=0.001)
-            # plt.savefig(os.path.join(wandb.run.dir, 'curves', f'mse_case_{case}_sl{slice}_ep{ep}_data.png'),
+            # plt.savefig(os.path.join(wandb.run.dir, f'mse_case_{case}_sl{slice}_ep{ep}_data.png'),
             #             dpi=70, bbox_inches='tight')
             # plt.close()
 
@@ -438,9 +441,9 @@ class PPINN_amc(nn.Module):
             #     plt.savefig(os.path.join(wandb.run.dir, 'curves', f'tac_case_{case}_sl{slice}_{i}_{i}_ep{ep}_data.png'),
             #                 dpi=70, bbox_inches='tight')
             #     plt.close()
-
+            #
             # if ep%50==0:
-            #     plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=timepoints).cpu().detach().numpy()
+            #     plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=timepoints)
             #     curves_to_plt = np.zeros([*self.original_data_shape, timepoints])
             #     curves_to_plt[self.original_data_indices] = plot_curves
             #
@@ -456,18 +459,8 @@ class PPINN_amc(nn.Module):
                            }
                 wandb.log(metrics)
 
-            # if self.epoch % 10 == 0:
-            #     data_curves = rearrange(data_curves, ' (dum1 x y t ) val-> (t val) dum1 x y', dum1=1, dum2=1,
-            #                             x=224,
-            #                             y=224, t=30)
-            #     plot_curves_at_epoch_phantom_st(data_dict, data_time[:, 0, 0, :], data_curves, self.device,
-            #                                     self.forward_NNs, ep,
-            #                                     plot_estimates=True)
-            #     data_curves = rearrange(data_curves, '(t val) dum1 dum2 x y-> (dum1 dum2 x y t ) val', val=1)
-                # plot_curves_at_epoch_phantom(data_dict, data_curves, self.device, self.forward_NNs, ep, plot_estimates=False)
-
             # plot intermediate results
-
+            #
             # cbf = self.get_cbf(seconds=False).squeeze()
             # mtt = self.get_mtt(seconds=True).squeeze()
             # mtt_min = self.get_mtt(seconds=False).squeeze()
@@ -488,9 +481,6 @@ class PPINN_amc(nn.Module):
             #     result_dict[key] *= mask_data
             # visualize_amc(case, slice, result_dict, data_dict)
 
-            # if ep > 5:
-            #     self.lw_res = 100
-            #     self.lw_data = 0
             self.current_iteration += 1
             self.epoch += 1
 
@@ -515,8 +505,9 @@ class PPINN_amc(nn.Module):
                  batch_aif,
                  batch_curves,
                  batch_boundary,
-                 batch_collo
-                ):
+                 batch_collo,
+                 batch_aif_time
+                 ):
 
         batch_coordinates.requires_grad = True
         batch_collo.requires_grad = True
@@ -529,24 +520,25 @@ class PPINN_amc(nn.Module):
 
         if self.lw_data:
             # compute data loss
-            c_aif, c_tissue = self.forward_NNs(batch_time, batch_coordinates)
+            c_aif, c_tissue = self.forward_NNs(batch_aif_time, batch_coordinates)
             loss_aif, loss_tissue = self.__loss_data(batch_aif, batch_curves, c_aif, c_tissue)
             loss += self.lw_data * (loss_aif + loss_tissue)
 
         if self.lw_res:
             # compute residual loss
-            c_aif, c_tissue, residual = self.forward_complete(batch_time, batch_collo)
+            c_aif, c_tissue, residual = self.forward_complete(batch_aif_time, batch_collo)
             loss_residual = self.__loss_residual(residual)
             loss += self.lw_res * loss_residual
+
         #     # compute data loss
         if np.isnan(float(loss.item())):
             raise ValueError('Loss is nan during training...')
 
-        if loss_aif < 0.0015 and not self.aif_training_off:
-            for param in self.NN_aif.parameters():
-                param.requires_grad = False
-                param.grad = None
-            self.aif_training_off = True
+        # if loss_aif < 0.0015 and not self.aif_training_off:
+        #     for param in self.NN_aif.parameters():
+        #         param.requires_grad = False
+        #         param.grad = None
+        #     self.aif_training_off = True
         #
         # if self.epoch > 5 and not self.tissue_training_off:
         #     for param in self.NN_tissue.parameters():

@@ -365,17 +365,22 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
     image_data_dict['mip'] = np.max(image_data_dict['array'], axis=0)
 
-    vesselmask = np.zeros_like(image_data_dict['mip'])
-    vesselmask[image_data_dict['mip']>150] = 1
 
-    tissuemask = np.zeros_like(image_data_dict['mip'])
-    image_data_avg = np.mean(image_data_dict['array'][:4,...], axis=0)
-    tissuemask[(image_data_avg > 30) & (image_data_avg < 100)] = 1
-
-    complete_mask = np.zeros_like(image_data_dict['mip'])
-    valid_voxels = np.where((brainmask_data == 1) & (tissuemask == 1) & (vesselmask == 0))
-
-    complete_mask[valid_voxels] = 1
+    # vesselmask = np.zeros_like(image_data_dict['mip'])
+    # vesselmask[image_data_dict['mip']>150] = 1
+    #
+    # tissuemask = np.zeros_like(image_data_dict['mip'])
+    # image_data_avg = np.mean(image_data_dict['array'][:4,...], axis=0)
+    # tissuemask[(image_data_avg > 30) & (image_data_avg < 100)] = 1
+    #
+    # complete_mask = np.zeros_like(image_data_dict['mip'])
+    # valid_voxels = np.where((brainmask_data == 1) & (tissuemask == 1) & (vesselmask == 0))
+    mtt = sitk.ReadImage(os.path.join(r"D:\PPINN_patient_data\sygnovia", case, "mtt.nii.gz"))
+    mtt = sitk.GetArrayFromImage(mtt)
+    vesselmask = np.zeros_like(mtt)
+    vesselmask[mtt >= 0] = 1
+    valid_voxels = np.where(vesselmask == 1)
+    complete_mask = vesselmask
 
     tac_baseline = np.mean(image_data_dict['array'][:4], axis=0, keepdims=True)
     image_data_dict['array'] = image_data_dict['array'] - tac_baseline
@@ -404,6 +409,7 @@ def load_data_AMC(gaussian_filter_type, sd=2,
     data_dict = get_tensors(data_dict)
     data_dict['aif_time'] = data_dict['time'][time_aif_location]
     data_dict['dwi_segmentation'] = dwi_segmentation
+
     return data_dict
 
 def load_data_spatiotemporal(gaussian_filter_type, sd=2.5,
@@ -542,15 +548,51 @@ def load_data_spatiotemporal(gaussian_filter_type, sd=2.5,
 
     return data_dict
 
+
 def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
-                    folder=r'D:/PPINN_patient_data/AMCCTP',
-                    case='C102'):
+                                 folder=r'D:/PPINN_patient_data/AMCCTP',
+                                 case='C102'):
+    sygno_peaks = {
+        'C102': 346,
+        'C103': 421,
+        'C104': 389,
+        'C105': 228,
+        'C106': 458,
+        'C107': 223,
+        'C108': 244,
+        'C109': 143,
+        'C110': 412,
+        'C111': 651,
+        'C112': 173,
+        'C113': 581,
+        'C114': 331,
+        'C115': 373,
+        'C116': 234,
+    }
+    sygno_base = {
+        'C102': -1.28,
+        'C103': 6.44,
+        'C104': 3.69,
+        'C105': 0.25,
+        'C106': 16.13,
+        'C107': 0.40,
+        'C108': -2.30,
+        'C109': -1.22,
+        'C110': -1.72,
+        'C111': -0.37,
+        'C112': -1.45,
+        'C113': 7.14,
+        'C114': -0.60,
+        'C115': 0.08,
+        'C116': 0.25,
+    }
+
     aif_location = os.path.join(folder, rf'AIF_annotations/{case}/aif.nii.gz')
     vof_location = os.path.join(folder, rf'VOF_annotations/{case}/vof.nii.gz')
     time_matrix = os.path.join(folder, rf'CTP_time_matrix/{case}/matrix.npy')
     ctp_folder = os.path.join(folder, rf'CTP_nii_registered/{case}/*.nii.gz')
     brainmask = os.path.join(folder, rf'CTP_nii_brainmask/{case}/brainmask.nii.gz')
-    dwi_segmentation = os.path.join(folder,  rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
+    dwi_segmentation = os.path.join(folder, rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
 
     # load image data
     image_data_dict = read_nii_folder(ctp_folder)
@@ -567,51 +609,54 @@ def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
     # load brainmask
     brainmask_data = sitk.GetArrayFromImage(sitk.ReadImage(brainmask))
     # get aif and vof data
-    aif_data = np.sum(np.multiply(aif_location, image_data_dict['array']), axis=(1,2,3)) / np.sum(aif_location)
-    vof_data = np.sum(np.multiply(vof_location, image_data_dict['array']), axis=(1,2,3)) / np.sum(vof_location)
+    aif_data = np.sum(np.multiply(aif_location, image_data_dict['array']), axis=(1, 2, 3)) / np.sum(aif_location)
+    vof_data = np.sum(np.multiply(vof_location, image_data_dict['array']), axis=(1, 2, 3)) / np.sum(vof_location)
     aif_time_data = time_data[time_aif_location]
     vof_time_data = time_data[time_vof_location]
 
-    # scale aif
-    vof_baseline = np.mean(vof_data[:4])
-    aif_baseline = np.mean(aif_data[:4])
+    sd_t = 2
+    truncate = np.ceil(2 * sd_t) / sd_t if sd_t != 0 else 0
+    aif_data = gaussian(aif_data, sigma=(sd_t), mode='nearest', truncate=truncate)
+    aif_baseline = aif_data[0]
+
     aif_wo_baseline = aif_data - aif_baseline
-    aif_part_nonzero_baseline = aif_wo_baseline.clip(max=0)
-    aif_wo_baseline = aif_wo_baseline.clip(min=0)
-    vof_wo_baseline = vof_data - vof_baseline
-    # now we use simpsons approximation because of irregular timing
-    cumsum_aif = simpson(aif_wo_baseline, aif_time_data)
-    cumsum_vof = simpson(vof_wo_baseline, vof_time_data)
-    # cumsum_aif = np.cumsum(aif_wo_baseline)[-1]
-    # cumsum_vof = np.cumsum(vof_wo_baseline)[-1]
-    ratio = cumsum_vof / cumsum_aif
-    aif_data = aif_wo_baseline * ratio + aif_baseline
-    aif_data += aif_part_nonzero_baseline * ratio
+    max_aif_heigt = np.max(aif_wo_baseline)
+    aif_wo_baseline *= (sygno_peaks[case] - sygno_base[case]) / max_aif_heigt
+    aif_data = aif_wo_baseline + sygno_base[case]
 
     image_data_dict['array'] = np.multiply(image_data_dict['array'], brainmask_data)
     image_data_dict['mip'] = np.max(image_data_dict['array'], axis=0)
 
-    vesselmask = np.zeros_like(image_data_dict['mip'])
-    vesselmask[image_data_dict['mip']>150] = 1
+    # vesselmask = np.zeros_like(image_data_dict['mip'])
+    # vesselmask[image_data_dict['mip'] > 150] = 1
+    #
+    # tissuemask = np.zeros_like(image_data_dict['mip'])
+    # image_data_avg = np.mean(image_data_dict['array'][:4, ...], axis=0)
+    # tissuemask[(image_data_avg > 30) & (image_data_avg < 100)] = 1
+    #
+    # complete_mask = np.zeros_like(image_data_dict['mip'])
+    # valid_voxels = np.where((brainmask_data == 1) & (tissuemask == 1) & (vesselmask == 0))
+    #
+    # complete_mask[valid_voxels] = 1
+    mtt = sitk.ReadImage(os.path.join(r"D:\PPINN_patient_data\sygnovia", case, "mtt.nii.gz"))
+    mtt = sitk.GetArrayFromImage(mtt)
+    vesselmask = np.zeros_like(mtt)
+    vesselmask[mtt >= 0] = 1
+    valid_voxels = np.where(vesselmask == 1)
+    complete_mask = vesselmask
 
-    tissuemask = np.zeros_like(image_data_dict['mip'])
-    image_data_avg = np.mean(image_data_dict['array'][:4,...], axis=0)
-    tissuemask[(image_data_avg > 30) & (image_data_avg < 100)] = 1
-
-    complete_mask = np.zeros_like(image_data_dict['mip'])
-    valid_voxels = np.where((brainmask_data == 1) & (tissuemask == 1) & (vesselmask == 0))
-
-    complete_mask[valid_voxels] = 1
+    tac_baseline = np.mean(image_data_dict['array'][:4], axis=0, keepdims=True)
+    image_data_dict['array'] = image_data_dict['array'] - tac_baseline
     # If smoothing, apply here
     if gaussian_filter_type:
         image_data_dict['array'] = apply_gaussian_filter_with_mask_amc(gaussian_filter_type,
-                                                                   image_data_dict['array'].copy(),
-                                                                   complete_mask,
-                                                                   sd=sd,
-                                                                   spacing=space)
+                                                                       image_data_dict['array'].copy(),
+                                                                       complete_mask,
+                                                                       sd=sd,
+                                                                       spacing=space)
+
     image_data_dict['array'] = image_data_dict['array'].astype(np.float32)
     image_data_dict['array'] = rearrange(image_data_dict['array'], 't d h w -> d h w t')
-
 
     data_dict = {'aif': aif_data,
                  'vof': vof_data,
@@ -621,7 +666,6 @@ def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
                  'mip': image_data_dict['mip'],
                  'mask': complete_mask,
                  }
-
 
     # create meshes
     data_dict = normalize_data(data_dict)
