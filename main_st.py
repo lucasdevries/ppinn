@@ -107,7 +107,7 @@ def train_amc(config):
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
 
-        for slice in tqdm(range(18,19)):
+        for slice in tqdm(range(20,22)):
             train_utils.set_seed(config['seed'])
             mask_data = data_dict['mask'][slice]
             valid_voxels = torch.where(mask_data == 1)
@@ -124,7 +124,9 @@ def train_amc(config):
                               n_inputs=1,
                               std_t=data_dict['std_t'],
                               original_data_shape=scan_dimensions[1:],
-                              original_indices=valid_voxels
+                              original_indices=valid_voxels,
+                              case=case,
+                              slice=slice
                               )
 
             result_dict = ppinn.fit(slice,

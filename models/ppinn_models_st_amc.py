@@ -26,9 +26,15 @@ class PPINN_amc(nn.Module):
                  n_inputs=1,
                  std_t=1,
                  original_data_shape = None,
-                 original_indices = None):
+                 original_indices = None,
+                 case='C102',
+                 slice=10):
         super(PPINN_amc, self).__init__()
         self.config = config
+        self.case = case
+        self.slice = slice
+        print(f"Processing case {self.case}, slice {self.slice}.")
+
         self.PID = os.getpid()
         self.logger = logging.getLogger(str(self.PID))
         self.is_cuda = torch.cuda.is_available()
@@ -46,6 +52,8 @@ class PPINN_amc(nn.Module):
         self.optimizer = None
         self.scheduler = None
         self.milestones = [self.config.epochs//3, 2*self.config.epochs//3]
+        self.gamma = self.config.gamma
+        self.max_epochs = self.config.epochs
         # self.milestones = [3*self.config.epochs]
 
         self.interpolator = None
@@ -72,7 +80,7 @@ class PPINN_amc(nn.Module):
         self.tissue_training_off = False
         n_layers = config.n_layers
         n_units = config.n_units
-        lr = config.lr
+        self.lr = config.lr
         loss_weights = (config.lw_data, config.lw_res, 0)
         bn = config.bn
         self.batch_size = config.batch_size
@@ -113,7 +121,7 @@ class PPINN_amc(nn.Module):
 
             self.NN_ode = MLP_ODE(
                 n_layers,
-                n_units,
+                16,
                 n_inputs=2,
                 neurons_out=3,
                 bn=bn,
@@ -133,7 +141,11 @@ class PPINN_amc(nn.Module):
 
         self.current_iteration = 0
         self.epoch = 1
-        self.set_lr(self.config.optimizer, lr)
+
+        self.init_from_previous_slice = self.config.init_from_previous_slice
+        self.init_model_parameters()
+        self.set_lr(self.config.optimizer, self.lr)
+
         self.set_loss_weights(loss_weights)
         self.set_params_to_domain()
         self.set_device(self.device)
@@ -213,11 +225,58 @@ class PPINN_amc(nn.Module):
         self.lw_bc.to(self.device)
 
     def set_lr(self, optimizer, lr):
+        # if self.init_from_previous_slice:
+        #     base = os.path.join(wandb.run.dir, 'models')
+        #     if os.path.isdir(base):
+        #         if os.listdir(base):
+        #             lr =0.5**2 * lr
+        #             self.optimizer = torch.optim.Adam(self.parameters(),
+        #                                               lr=lr) if optimizer == 'Adam' else torch.optim.SGD(
+        #                 self.parameters(), lr=lr)
+        #             self.optimizer.load_state_dict(torch.load(os.path.join(base, f'optimizer_case_{self.case}_sl{self.slice-1}.pth')))
+        #
+        #             # https://github.com/pytorch/pytorch/issues/2830
+        #             for state in self.optimizer.state.values():
+        #                 for k, v in state.items():
+        #                     if isinstance(v, torch.Tensor):
+        #                         state[k] = v.cuda()
+        #
+        #             self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
+        #                                                           milestones=self.milestones,
+        #                                                           gamma=1)
+        #         else:
+        #             self.optimizer = torch.optim.Adam(self.parameters(), lr=lr) if optimizer == 'Adam' else torch.optim.SGD(
+        #                 self.parameters(), lr=lr)
+        #             self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
+        #                                                                   milestones=self.milestones,
+        #                                                                   gamma=0.5)
+        # else:
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr) if optimizer == 'Adam' else torch.optim.SGD(
             self.parameters(), lr=lr)
-        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
+        if self.config.use_scheduler:
+            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                               milestones=self.milestones,
-                                                              gamma=0.5)
+                                                              gamma=self.gamma)
+
+    def init_model_parameters(self):
+        if self.init_from_previous_slice:
+            print('Initializing parameters from previous slice if available')
+            base = os.path.join(wandb.run.dir, 'models')
+            os.makedirs(base, exist_ok=True)
+            if os.path.isdir(base):
+                if os.listdir(base):
+                    self.NN_aif.load_state_dict(torch.load(os.path.join(base, f'aif_case_{self.case}_sl{self.slice-1}.pth')))
+                    self.NN_tissue.load_state_dict(torch.load(os.path.join(base, f'tac_case_{self.case}_sl{self.slice-1}.pth')))
+                    self.NN_ode.load_state_dict(torch.load(os.path.join(base, f'ode_case_{self.case}_sl{self.slice-1}.pth')))
+                    print(f"Models intitialized with slice {self.slice-1}.")
+                    # # self.lr = 0.5**2 * self.config.lr
+                    # self.milestones = [self.max_epochs]
+                    # self.max_epochs = self.config.epochs // 3
+                    # print(f'New lr : {self.lr}, milestone: {self.milestones}, max_epoch: {self.max_epochs}')
+                else:
+                    print("No earlier slices available.")
+            else:
+                print("Given directory doesn't exist")
 
     def set_device(self, device):
         self.to(device)
@@ -334,7 +393,7 @@ class PPINN_amc(nn.Module):
         #
         # visualize_amc(case, slice, result_dict, data_dict)
 
-        for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + epochs + 1)):
+        for ep in tqdm(range(self.current_iteration + 1, self.current_iteration + self.max_epochs + 1)):
             collocation_coordinates[:, 0] = torch.FloatTensor(*collocation_coordinates.shape[:-1]).uniform_(
                  torch.min(data_time), torch.max(data_time)
             )
@@ -399,7 +458,8 @@ class PPINN_amc(nn.Module):
                 iter+=1
 
             # self.forward_complete_check(batch_time, derivative_coordinates)
-            self.scheduler.step()
+            if self.config.use_scheduler:
+                self.scheduler.step()
 
             # plot mse for tissue curves
             #
@@ -461,29 +521,36 @@ class PPINN_amc(nn.Module):
 
             # plot intermediate results
             #
-            # cbf = self.get_cbf(seconds=False).squeeze()
-            # mtt = self.get_mtt(seconds=True).squeeze()
-            # mtt_min = self.get_mtt(seconds=False).squeeze()
-            # delay = self.get_delay(seconds=True).squeeze()
-            # cbv = cbf * mtt_min
-            # tmax = delay + 0.5 * mtt
-            #
-            # result_dict = {'cbf': cbf,
-            #                'cbv': cbv,
-            #                'mtt': mtt,
-            #                'delay': delay,
-            #                'tmax': tmax}
-            # # result_dict = drop_unphysical_amc(result_dict)
-            # mask_data = data_dict['mask'][slice]
-            # mask_data = mask_data.cpu().numpy()
-            # for key in result_dict.keys():
-            #     result_dict[key] = result_dict[key].cpu().detach().numpy()
-            #     result_dict[key] *= mask_data
-            # visualize_amc(case, slice, result_dict, data_dict)
+            cbf = self.get_cbf(seconds=False).squeeze()
+            mtt = self.get_mtt(seconds=True).squeeze()
+            mtt_min = self.get_mtt(seconds=False).squeeze()
+            delay = self.get_delay(seconds=True).squeeze()
+            cbv = cbf * mtt_min
+            tmax = delay + 0.5 * mtt
+
+            result_dict = {'cbf': cbf,
+                           'cbv': cbv,
+                           'mtt': mtt,
+                           'delay': delay,
+                           'tmax': tmax}
+            # result_dict = drop_unphysical_amc(result_dict)
+            mask_data = data_dict['mask'][slice]
+            mask_data = mask_data.cpu().numpy()
+            for key in result_dict.keys():
+                result_dict[key] = result_dict[key].cpu().detach().numpy()
+                result_dict[key] *= mask_data
+            visualize_amc(case, slice, result_dict, data_dict)
 
             self.current_iteration += 1
             self.epoch += 1
 
+
+        # save models
+        if self.init_from_previous_slice:
+            torch.save(self.NN_aif.state_dict(), os.path.join(wandb.run.dir, 'models', f'aif_case_{case}_sl{slice}.pth'))
+            torch.save(self.NN_tissue.state_dict(), os.path.join(wandb.run.dir, 'models', f'tac_case_{case}_sl{slice}.pth'))
+            torch.save(self.NN_ode.state_dict(), os.path.join(wandb.run.dir, 'models', f'ode_case_{case}_sl{slice}.pth'))
+            torch.save(self.optimizer.state_dict(), os.path.join(wandb.run.dir, 'models', f'optimizer_case_{case}_sl{slice}.pth'))
         # get results
         cbf = self.get_cbf(seconds=False).squeeze()
         mtt = self.get_mtt(seconds=True).squeeze()

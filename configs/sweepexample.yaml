@@ -13,16 +13,25 @@ parameters:
   lr:
     values:
       - 5e-3
-      - 5e-4
+  init_from_previous_slice:
+    values:
+      - true
   sd:
     values:
       - 4
   epochs:
     values:
-      - 300
+      - 100
+  gamma:
+    values:
+      - 1
+  use_scheduler:
+    values:
+      - true
+      - false
   lw_res:
     values:
-      - 70
+      - 1
   batch_size:
     values:
       - 5000
