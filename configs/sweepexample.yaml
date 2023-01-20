@@ -7,28 +7,36 @@ parameters:
   siren_w0:
     values:
       - 30
+  filter_type:
+    values:
+      - false
   hidden_tissue:
     values:
-      - 256
+      - 128
+  hidden_ode:
+    values:
+      - 64
+  temporal_smoothing:
+    values:
+      - false
   lr:
     values:
-      - 5e-3
+      - 1e-3
   init_from_previous_slice:
     values:
       - true
   sd:
     values:
-      - 4
+      - 0
   epochs:
     values:
       - 100
   gamma:
     values:
-      - 1
+      - 0.5
   use_scheduler:
     values:
       - true
-      - false
   lw_res:
     values:
       - 1

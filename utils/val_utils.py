@@ -1099,7 +1099,7 @@ def plot_curves_at_epoch_amc_st(data_dict, data_curves, device, forward_NNs, ep,
     time_aif = data_time_inf[0,0,:, :1]
 
     with torch.no_grad():
-        splits_txy = torch.tensor_split(data_time_inf, 20)
+        splits_txy = torch.tensor_split(data_time_inf, 40)
 
         c_tissue = []
         for txys in splits_txy:

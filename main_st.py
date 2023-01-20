@@ -91,12 +91,12 @@ def train(config):
 
 def train_amc(config):
     cases = os.listdir(r'D:/PPINN_patient_data/AMCCTP/CTP_nii_registered')
-    for case in tqdm(cases[:1]):
-
+    for case in tqdm(cases[0:8]):
         os.makedirs(os.path.join(wandb.run.dir, 'results', case))
         data_dict = data_utils.load_data_AMC_spatiotemporal(gaussian_filter_type=config.filter_type,
                                              sd=config.sd,
-                                             case=case)
+                                             case=case,
+                                                            temporal_smoothing=config.temporal_smoothing)
 
         scan_dimensions = data_dict['curves'].shape[:-1]
         slices = scan_dimensions[0]
@@ -106,8 +106,38 @@ def train_amc(config):
         mtt_results = np.zeros([*scan_dimensions], dtype=np.float32)
         delay_results = np.zeros([*scan_dimensions], dtype=np.float32)
         tmax_results = np.zeros([*scan_dimensions], dtype=np.float32)
+        slice=slices//2
+        train_utils.set_seed(config['seed'])
+        mask_data = data_dict['mask'][slice]
+        valid_voxels = torch.where(mask_data == 1)
+        shape_in = torch.Size([1, len(valid_voxels[0]), 1])
+        ppinn = PPINN_amc(config,
+                          shape_in=shape_in,
+                          n_inputs=1,
+                          std_t=data_dict['std_t'],
+                          original_data_shape=scan_dimensions[1:],
+                          original_indices=valid_voxels,
+                          case=case,
+                          slice=slice,
+                          first=True
+                          )
+        _ = ppinn.fit(slice,
+                                data_dict,
+                                batch_size=config.batch_size,
+                                epochs=int(config.epochs),
+                                case=case)
 
-        for slice in tqdm(range(20,22)):
+        slice_list = slices * [0]
+        l1 = list(reversed(range(slices//2)))
+        l2 = list(range(slices//2, slices))
+        if len(slice_list[0::2]) == len(l2) and len(slice_list[1::2]) == len(l1):
+            slice_list[0::2] = l2
+            slice_list[1::2] = l1
+        else:
+            slice_list[0::2] = l1
+            slice_list[1::2] = l2
+
+        for slice in tqdm(slice_list):
             train_utils.set_seed(config['seed'])
             mask_data = data_dict['mask'][slice]
             valid_voxels = torch.where(mask_data == 1)
@@ -126,7 +156,8 @@ def train_amc(config):
                               original_data_shape=scan_dimensions[1:],
                               original_indices=valid_voxels,
                               case=case,
-                              slice=slice
+                              slice=slice,
+                              first=False
                               )
 
             result_dict = ppinn.fit(slice,
@@ -152,16 +183,16 @@ def train_amc(config):
             visualize_amc(case, slice, result_dict, data_dict)
             # visualize_amc_sygno(case, slice, sygnovia_results, data_dict)
 
-        # save maps as sitks
-        data_utils.save_perfusion_parameters_amc(config,
-                                                 case,
-                                                 cbf_results,
-                                                 cbv_results,
-                                                 mtt_results,
-                                                 delay_results,
-                                                 tmax_results,
-                                                 data_dict
-                                                )
+            # save maps as sitks
+            data_utils.save_perfusion_parameters_amc(config,
+                                                     case,
+                                                     cbf_results,
+                                                     cbv_results,
+                                                     mtt_results,
+                                                     delay_results,
+                                                     tmax_results,
+                                                     data_dict
+                                                    )
 
 
 def train_isles(config):

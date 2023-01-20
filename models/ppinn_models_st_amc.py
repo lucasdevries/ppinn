@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from tqdm import tqdm
 import logging
-import os
+import os, glob
 import wandb
 from torchsummary import summary
 from utils.data_utils import CurveDataset
@@ -28,7 +28,8 @@ class PPINN_amc(nn.Module):
                  original_data_shape = None,
                  original_indices = None,
                  case='C102',
-                 slice=10):
+                 slice=10,
+                 first=False):
         super(PPINN_amc, self).__init__()
         self.config = config
         self.case = case
@@ -51,9 +52,14 @@ class PPINN_amc(nn.Module):
         self.lw_data, self.lw_res, self.lw_bc = (0, 0, 0)
         self.optimizer = None
         self.scheduler = None
-        self.milestones = [self.config.epochs//3, 2*self.config.epochs//3]
+        # self.max_epochs = self.config.epochs
+        self.first = first
+        if first:
+            self.max_epochs = 2*self.config.epochs
+        else:
+            self.max_epochs = self.config.epochs
+        self.milestones = [self.max_epochs//3, 2*self.max_epochs//3]
         self.gamma = self.config.gamma
-        self.max_epochs = self.config.epochs
         # self.milestones = [3*self.config.epochs]
 
         self.interpolator = None
@@ -99,7 +105,7 @@ class PPINN_amc(nn.Module):
                                 )
             self.NN_ode = MLP_ODE_siren(
                                             dim_in=2,  # input dimension, ex. 2d coor
-                                            dim_hidden=16,  # hidden dimension normal 16
+                                            dim_hidden=self.config.hidden_ode,  # hidden dimension normal 16
                                             dim_out=3,  # output dimension, ex. rgb value
                                             num_layers=3,  # number of layers
                                             final_activation=nn.Identity(),  # activation of final layer (nn.Identity() for direct output)
@@ -121,7 +127,7 @@ class PPINN_amc(nn.Module):
 
             self.NN_ode = MLP_ODE(
                 n_layers,
-                16,
+                self.config.hidden_ode,
                 n_inputs=2,
                 neurons_out=3,
                 bn=bn,
@@ -253,6 +259,11 @@ class PPINN_amc(nn.Module):
         # else:
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr) if optimizer == 'Adam' else torch.optim.SGD(
             self.parameters(), lr=lr)
+        # self.optimizer = torch.optim.Adam([
+        #         {'params': self.NN_aif.parameters(), 'weight_decay':1e-4},
+        #         {'params': self.NN_tissue.parameters(), 'weight_decay':0},
+        #         {'params': self.NN_ode.parameters(), 'weight_decay':0},
+        #     ], lr=lr)
         if self.config.use_scheduler:
             self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                               milestones=self.milestones,
@@ -261,14 +272,22 @@ class PPINN_amc(nn.Module):
     def init_model_parameters(self):
         if self.init_from_previous_slice:
             print('Initializing parameters from previous slice if available')
-            base = os.path.join(wandb.run.dir, 'models')
+            base = os.path.join(wandb.run.dir,'models',f'{self.case}')
             os.makedirs(base, exist_ok=True)
             if os.path.isdir(base):
-                if os.listdir(base):
-                    self.NN_aif.load_state_dict(torch.load(os.path.join(base, f'aif_case_{self.case}_sl{self.slice-1}.pth')))
-                    self.NN_tissue.load_state_dict(torch.load(os.path.join(base, f'tac_case_{self.case}_sl{self.slice-1}.pth')))
-                    self.NN_ode.load_state_dict(torch.load(os.path.join(base, f'ode_case_{self.case}_sl{self.slice-1}.pth')))
-                    print(f"Models intitialized with slice {self.slice-1}.")
+                if len(os.listdir(base)) == 3:
+                    self.NN_aif.load_state_dict(torch.load(os.path.join(base, f'aif_case_{self.case}_first.pth')))
+                    self.NN_tissue.load_state_dict(torch.load(os.path.join(base, f'tac_case_{self.case}_first.pth')))
+                    self.NN_ode.load_state_dict(torch.load(os.path.join(base, f'ode_case_{self.case}_first.pth')))
+                    print(f"Models intitialized with slice first.")
+                elif len(os.listdir(base)) > 3:
+                    available_slices = [int(x.split("_")[-1].split('.')[0][2:]) for x in glob.glob(os.path.join(base, f'aif_case_{self.case}_sl*.pth'))]
+                    #find closest
+                    closest_slice = min(available_slices, key=lambda x: abs(x - self.slice))
+                    self.NN_aif.load_state_dict(torch.load(os.path.join(base, f'aif_case_{self.case}_sl{closest_slice}.pth')))
+                    self.NN_tissue.load_state_dict(torch.load(os.path.join(base, f'tac_case_{self.case}_sl{closest_slice}.pth')))
+                    self.NN_ode.load_state_dict(torch.load(os.path.join(base, f'ode_case_{self.case}_sl{closest_slice}.pth')))
+                    print(f"Models intitialized with slice {closest_slice}.")
                     # # self.lr = 0.5**2 * self.config.lr
                     # self.milestones = [self.max_epochs]
                     # self.max_epochs = self.config.epochs // 3
@@ -502,13 +521,13 @@ class PPINN_amc(nn.Module):
             #                 dpi=70, bbox_inches='tight')
             #     plt.close()
             #
-            # if ep%50==0:
-            #     plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=timepoints)
-            #     curves_to_plt = np.zeros([*self.original_data_shape, timepoints])
-            #     curves_to_plt[self.original_data_indices] = plot_curves
-            #
-            #     plot_curves_at_epoch_amc_st(data_dict, curves_to_plt, self.device, self.forward_NNs, ep, case, slice,
-            #                                 plot_estimates=True)
+            if ep%25==0:
+                plot_curves = rearrange(data_curves, '(dum1  t ) val -> dum1 (t val)', t=timepoints)
+                curves_to_plt = np.zeros([*self.original_data_shape, timepoints])
+                curves_to_plt[self.original_data_indices] = plot_curves
+
+                plot_curves_at_epoch_amc_st(data_dict, curves_to_plt, self.device, self.forward_NNs, ep, case, slice,
+                                            plot_estimates=True)
 
             # data_curves = data_curves.cpu().detach().numpy()
             if self.config.wandb:
@@ -520,37 +539,49 @@ class PPINN_amc(nn.Module):
                 wandb.log(metrics)
 
             # plot intermediate results
-            #
-            cbf = self.get_cbf(seconds=False).squeeze()
-            mtt = self.get_mtt(seconds=True).squeeze()
-            mtt_min = self.get_mtt(seconds=False).squeeze()
-            delay = self.get_delay(seconds=True).squeeze()
-            cbv = cbf * mtt_min
-            tmax = delay + 0.5 * mtt
+            if ep % 25 == 0:
+                cbf = self.get_cbf(seconds=False).squeeze()
+                mtt = self.get_mtt(seconds=True).squeeze()
+                mtt_min = self.get_mtt(seconds=False).squeeze()
+                delay = self.get_delay(seconds=True).squeeze()
+                cbv = cbf * mtt_min
+                tmax = delay + 0.5 * mtt
 
-            result_dict = {'cbf': cbf,
-                           'cbv': cbv,
-                           'mtt': mtt,
-                           'delay': delay,
-                           'tmax': tmax}
-            # result_dict = drop_unphysical_amc(result_dict)
-            mask_data = data_dict['mask'][slice]
-            mask_data = mask_data.cpu().numpy()
-            for key in result_dict.keys():
-                result_dict[key] = result_dict[key].cpu().detach().numpy()
-                result_dict[key] *= mask_data
-            visualize_amc(case, slice, result_dict, data_dict)
+                result_dict = {'cbf': cbf,
+                               'cbv': cbv,
+                               'mtt': mtt,
+                               'delay': delay,
+                               'tmax': tmax}
+                # result_dict = drop_unphysical_amc(result_dict)
+                mask_data = data_dict['mask'][slice]
+                mask_data = mask_data.cpu().numpy()
+                for key in result_dict.keys():
+                    result_dict[key] = result_dict[key].cpu().detach().numpy()
+                    result_dict[key] *= mask_data
+                visualize_amc(case, slice, result_dict, data_dict)
 
             self.current_iteration += 1
             self.epoch += 1
 
 
         # save models
-        if self.init_from_previous_slice:
-            torch.save(self.NN_aif.state_dict(), os.path.join(wandb.run.dir, 'models', f'aif_case_{case}_sl{slice}.pth'))
-            torch.save(self.NN_tissue.state_dict(), os.path.join(wandb.run.dir, 'models', f'tac_case_{case}_sl{slice}.pth'))
-            torch.save(self.NN_ode.state_dict(), os.path.join(wandb.run.dir, 'models', f'ode_case_{case}_sl{slice}.pth'))
-            torch.save(self.optimizer.state_dict(), os.path.join(wandb.run.dir, 'models', f'optimizer_case_{case}_sl{slice}.pth'))
+
+        if self.init_from_previous_slice and not self.first:
+            torch.save(self.NN_aif.state_dict(), os.path.join(wandb.run.dir, 'models',f'{case}', f'aif_case_{case}_sl{slice}.pth'))
+            torch.save(self.NN_tissue.state_dict(), os.path.join(wandb.run.dir, 'models',f'{case}', f'tac_case_{case}_sl{slice}.pth'))
+            torch.save(self.NN_ode.state_dict(), os.path.join(wandb.run.dir, 'models',f'{case}', f'ode_case_{case}_sl{slice}.pth'))
+            # torch.save(self.optimizer.state_dict(), os.path.join(wandb.run.dir, 'models',f'{case}', f'optimizer_case_{case}_sl{slice}.pth'))
+
+        if self.init_from_previous_slice and self.first:
+            torch.save(self.NN_aif.state_dict(),
+                       os.path.join(wandb.run.dir, 'models', f'{case}', f'aif_case_{case}_first.pth'))
+            torch.save(self.NN_tissue.state_dict(),
+                       os.path.join(wandb.run.dir, 'models', f'{case}', f'tac_case_{case}_first.pth'))
+            torch.save(self.NN_ode.state_dict(),
+                       os.path.join(wandb.run.dir, 'models', f'{case}', f'ode_case_{case}_first.pth'))
+            # torch.save(self.optimizer.state_dict(),
+            #            os.path.join(wandb.run.dir, 'models', f'{case}', f'optimizer_case_{case}_first.pth'))
+
         # get results
         cbf = self.get_cbf(seconds=False).squeeze()
         mtt = self.get_mtt(seconds=True).squeeze()

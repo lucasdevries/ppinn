@@ -32,21 +32,22 @@ occl_site = {
 }
 
 
-def make_rcbf():
-    base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_ppinn_amcctp"
-    cases = os.listdir(base)[:-1]
+def make_core(parameter):
+    base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_sppinn_amcctp"
+    cases = os.listdir(base)
     dices = []
-
-    for case in cases[-3:]:
+    for case in cases:
         print(case)
+
         results = {'cbv': sitk.ReadImage(os.path.join(base, case, "cbv.nii")),
                    'cbf': sitk.ReadImage(os.path.join(base, case, "cbf.nii")),
                    'mtt': sitk.ReadImage(os.path.join(base, case, "mtt.nii")),
                    'tmax': sitk.ReadImage(os.path.join(base, case, "tmax.nii")),
                    'delay': sitk.ReadImage(os.path.join(base, case, "delay.nii")),
                    'dwi_seg': sitk.ReadImage(os.path.join(base, case, "dwi_seg.nii")),
-                   'brainmask': sitk.ReadImage(os.path.join(base, case, "brainmask.nii.gz")),
-                   'mip': sitk.ReadImage(os.path.join(r"D:\PPINN_patient_data\AMCCTP\MIP", case, "mip.nii.gz")),
+                   'brainmask': sitk.ReadImage(os.path.join(base, case, "brainmask.nii")),
+                   'vesselmask': sitk.ReadImage(os.path.join(base, case, "vesselmask.nii")),
+
                    'contra': sitk.ReadImage(os.path.join(r"D:\PPINN_patient_data\AMCCTP\MRI_nii_registered", case,
                                                          "DWI_seg_registered_contralateral.nii.gz")),
                    'LH': sitk.ReadImage(os.path.join(r"D:\PPINN_patient_data\AMCCTP\MRI_nii_registered", case,
@@ -57,59 +58,54 @@ def make_rcbf():
                                                      "00_noskull.nii.gz")),
                    }
         results = {key: sitk.GetArrayFromImage(val) for key, val in results.items()}
-        sd = 2
-        truncate = np.ceil(2 * sd) / sd if sd != 0 else 0
-        results['baseline'] = gaussian(results['baseline'], sigma=(0, sd, sd), mode='nearest', truncate=truncate)
 
-        results['tissue_mask'] = np.zeros_like(results['baseline'])
-        results['tissue_mask'][(results['baseline'] > 30) & (results['baseline'] < 100) & (results['cbf'] > 0)] = 1
-
-        sd = 5
-        truncate = np.ceil(2 * sd) / sd if sd != 0 else 0
-        results['cbf'] = gaussian(results['cbf'], sigma=(0, sd, sd), mode='nearest', truncate=truncate)
-        results['cbf'] = results['tissue_mask'] * results['cbf']
-        # plt.imshow(results['cbf'][22])
-        # plt.title(case)
-        # plt.show()
-
-        results['RH'] = results['RH'] * results['tissue_mask']
-        results['LH'] = results['LH'] * results['tissue_mask']
+        results['RH'] = results['RH'] * results['vesselmask']
+        results['LH'] = results['LH'] * results['vesselmask']
+        # use only central 50% of data
+        start = results[parameter].shape[0]//4
+        end = 3*results[parameter].shape[0]//4
 
         if occl_site[case] == 'L':
-            healthy = results['RH'] * results['cbf']
+            healthy = results['RH'][start:end] * results[parameter][start:end]
             mean_healthy = np.mean(healthy[healthy > 0])
             print(mean_healthy)
         elif occl_site[case] == 'R':
-            healthy = results['LH'] * results['cbf']
+            healthy = results['LH'][start:end] * results[parameter][start:end]
             mean_healthy = np.mean(healthy[healthy > 0])
             print(mean_healthy)
-
         else:
             raise NotImplementedError('Not possible..')
 
-        plt.hist(healthy[healthy > 0].flatten(), bins=50)
-        plt.show()
+        results['relative'] = results[parameter] / mean_healthy
 
-        results['rcbf'] = results['cbf'] / mean_healthy
-
-        results['pred_core'] = np.zeros_like(results['rcbf'])
+        results['pred_core'] = np.zeros_like(results['relative'])
+        results['hypoperfused'] = np.zeros_like(results['relative'])
+        results['corrected_core'] = np.zeros_like(results['relative'])
 
         if occl_site[case] == 'L':
-            results['pred_core'][(results['LH'] > 0) & (results['rcbf']<0.3)] = 1
+            results['hypoperfused'][(results['tmax']>6) & (results['LH'] > 0)] = 1
+            results['pred_core'][(results['LH'] > 0) & (results['relative']<0.3)] = 1
         elif occl_site[case] == 'R':
-            results['pred_core'][(results['RH'] > 0) & (results['rcbf']<0.3)] = 1
+            results['hypoperfused'][(results['tmax']>6) & (results['RH'] > 0)] = 1
+            results['pred_core'][(results['RH'] > 0) & (results['relative']<0.3)] = 1
         else:
             raise NotImplementedError('Not possible..')
+
+        results['corrected_core'][(results['pred_core'] == 1) & (results['hypoperfused'] == 1)] = 1
 
         cbv = sitk.ReadImage(os.path.join(base, case, "cbv.nii"))
-        pred_sitk = np2itk(results['pred_core'],cbv)
-        sitk.WriteImage(pred_sitk, os.path.join(base, case, "pred_ppinn.nii.gz"))
-        rcbf_sitk = np2itk(results['rcbf'],cbv)
-        sitk.WriteImage(rcbf_sitk, os.path.join(base, case, "rcbf.nii.gz"))
+        pred_core_sitk = np2itk(results['pred_core'], cbv)
+        corrected_core_sitk = np2itk(results['corrected_core'], cbv)
+        hypoperfused_sitk = np2itk(results['hypoperfused'], cbv)
+        relative_sitk = np2itk(results['relative'], cbv)
 
-        #
+        sitk.WriteImage(relative_sitk, os.path.join(base, case, f"r{parameter}.nii.gz"))
+        sitk.WriteImage(pred_core_sitk, os.path.join(base, case, f"pred_core_{parameter}.nii.gz"))
+        sitk.WriteImage(corrected_core_sitk, os.path.join(base, case, f"corrected_core_{parameter}.nii.gz"))
+        sitk.WriteImage(hypoperfused_sitk, os.path.join(base, case, f"hypoperfused.nii.gz"))
+
         seg = results['pred_core']
-        gt = results['dwi_seg']
+        gt = results['dwi_seg'] * results['vesselmask']
         dices.append(np.sum(seg[gt == 1]) * 2.0 / (np.sum(seg) + np.sum(gt)))
     print(dices)
         # if case == 'C106':
@@ -125,4 +121,6 @@ def make_rcbf():
 
 
 if __name__ == '__main__':
-    make_rcbf()
+    make_core('cbf')
+    make_core('cbv')
+

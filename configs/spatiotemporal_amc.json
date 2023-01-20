@@ -18,6 +18,7 @@
   "milestone": 100,
   "siren": true,
   "hidden_tissue": 256,
+  "hidden_ode": 64,
   "siren_w0": 30,
   "bn" : false,
   "batch_size": 5000,

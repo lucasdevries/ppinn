@@ -13,10 +13,15 @@ from einops.einops import rearrange, repeat
 from tqdm import tqdm
 import pandas as pd
 from matplotlib import cm
+import matplotlib.patches as patches
+from skimage import data, segmentation
+from skimage import filters
+from skimage import measure
+from scipy import ndimage
 font = {'family': 'serif',
         'color': 'black',
         'weight': 'normal',
-        'size': 11,
+        'size': 9,
         }
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["axes.linewidth"] = 1.5
@@ -41,7 +46,7 @@ occlusion_side = {'C102': 'L',
                   'C116': 'R'}
 
 min_vals = {'cbf': 0.01, 'mtt': 0.01, 'cbv': 0.1, 'delay': 0.01, 'tmax': 0.01, 'dwi_seg':0.01}
-max_vals = {'cbf': 100, 'mtt': 18, 'cbv': 4, 'delay': 4.5, 'tmax': 10, 'dwi_seg':1}
+max_vals = {'cbf': 75, 'mtt': 15, 'cbv': 4, 'delay': 4, 'tmax': 10, 'dwi_seg':1}
 param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax', 'dwi_seg': 'DWI seg.'}
 
 def plot_slice(case, method='SV'):
@@ -229,108 +234,127 @@ def lines_box_plot_amc(method='PPINN'):
     plt.show()
 
 
-def plot_sv_vs_ppinn():
-    base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_ppinn_amcctp"
-    cases = [x for x in os.listdir(base) if 'C1' in x]
+def plot_sv_vs_sppinn(patient_dict, max_sppinn_cbf, max_sppinn_cbv):
+    base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_sppinn_amcctp"
 
-    min_vals = {'cbf': 0, 'mtt': 0, 'cbv': 0, 'delay': 0, 'tmax': 0}
-    max_vals = {'cbf': 100, 'mtt': 28, 'cbv': 6, 'delay': 3.5, 'tmax': 20}
-    param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax'}
-    param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
-    for case in tqdm(cases):
+    cases = patient_dict.keys()
+
+    min_vals = {'cbf': 0.01, 'mtt': 0.01, 'cbv': 0.01, 'delay': 0.01, 'tmax': 0.01, 'dwi':-20}
+    max_vals = {'cbf': 75, 'mtt': 15, 'cbv': 4, 'delay': 3.5, 'tmax': 10, 'dwi':40}
+    param_title = {'cbf': 'CBF', 'mtt': 'MTT', 'cbv': 'CBV', 'delay': 'Delay', 'tmax': 'Tmax', 'dwi': 'DWI'}
+    # param_unts = {'cbf': '[ml/100g/min]', 'mtt': '[s]', 'cbv': '[ml/100g]', 'delay': '[s]', 'tmax': '[s]'}
+
+    fig = plt.figure(figsize=(7.2, len(cases)*3))
+
+    outer = gridspec.GridSpec(len(cases), 5, wspace=0, hspace=0.05)
+
+    cmap = mpl.cm.get_cmap('jet').copy()
+    cmap.set_under(color='black')
+
+    cmap_bw = mpl.cm.get_cmap('Greys_r').copy()
+    cmap_bw.set_under(color='black')
+
+    for ix, case in tqdm(enumerate(cases)):
+        slice_nr = patient_dict[case]['slice']
         results = {'cbv': sitk.ReadImage(os.path.join(base, case, "cbv.nii")),
                    'cbf': sitk.ReadImage(os.path.join(base, case, "cbf.nii")),
                    'mtt': sitk.ReadImage(os.path.join(base, case, "mtt.nii")),
                    'tmax': sitk.ReadImage(os.path.join(base, case, "tmax.nii")),
                    'delay': sitk.ReadImage(os.path.join(base, case, "delay.nii")),
                    'vesselmask': sitk.ReadImage(os.path.join(base, case, "vesselmask.nii")),
+                   'pred_core': sitk.ReadImage(os.path.join(base, case, "corrected_core_cbf.nii")),
+
                    'dwi_seg': sitk.ReadImage(os.path.join(base, case, "dwi_seg.nii")),
+
+                   'dwi': sitk.ReadImage(os.path.join(r"D:\PPINN_patient_data\AMCCTP\MRI_nii_registered",
+                                                      case, "DWI_registered.nii.gz")),
                    'brainmask': sitk.ReadImage(os.path.join(base, case, "brainmask.nii.gz"))}
+
         results = {key: sitk.GetArrayFromImage(val) for key, val in results.items()}
         results_sv = load_sygnovia_results_amc(case)
-        svmask = results_sv['cbf'] + results_sv['mtt'] + results_sv['cbv'] + results_sv['delay'] + results_sv['tmax']
-        results_sv['sv_mask'] = np.zeros_like(results_sv['cbf'])
-        results_sv['sv_mask'][svmask != 0] = 1
-        min_vals_ppinn = {'cbf': np.percentile(results['cbf'][results['vesselmask'] == 1], q=10),
-                          'mtt': np.percentile(results['mtt'][results['vesselmask'] == 1], q=10),
-                          'cbv': np.percentile(results['cbv'][results['vesselmask'] == 1], q=10),
-                          'delay': np.percentile(results['delay'][results['vesselmask'] == 1], q=10),
-                          'tmax': np.percentile(results['tmax'][results['vesselmask'] == 1], q=10)}
 
-        max_vals_ppinn = {'cbf': np.percentile(results['cbf'][results['vesselmask'] == 1], q=90),
-                          'mtt': np.percentile(results['mtt'][results['vesselmask'] == 1], q=90),
-                          'cbv': np.percentile(results['cbv'][results['vesselmask'] == 1], q=90),
-                          'delay': np.percentile(results['delay'][results['vesselmask'] == 1], q=90),
-                          'tmax': np.percentile(results['tmax'][results['vesselmask'] == 1], q=90)}
+        for i, key in zip(range(5), ['cbf', 'mtt', 'cbv', 'tmax', 'dwi']):
+            inner = gridspec.GridSpecFromSubplotSpec(2, 1,
+                                                         subplot_spec=outer[ix, i],
+                                                         wspace=0.0,
+                                                         hspace=0.0)
+            ax = plt.Subplot(fig, inner[0])
+            if key == 'dwi':
+                image = results[key][slice_nr]
+                image = (image - np.min(image)) / np.ptp(image)
+                ax.imshow(image, cmap=cmap_bw, vmin=0, vmax=1)
+                mask = results['dwi_seg'][slice_nr]
+                contours_dwiseg = measure.find_contours(mask)
+                for contour in contours_dwiseg:
+                    ax.plot(contour[:, 1], contour[:, 0], linewidth=0.5, c='red')
 
-        min_vals_sv = {'cbf': np.percentile(results_sv['cbf'][results_sv['sv_mask'] == 1], q=10),
-                       'mtt': np.percentile(results_sv['mtt'][results_sv['sv_mask'] == 1], q=10),
-                       'cbv': np.percentile(results_sv['cbv'][results_sv['sv_mask'] == 1], q=10),
-                       'delay': np.percentile(results_sv['delay'][results_sv['sv_mask'] == 1], q=10),
-                       'tmax': np.percentile(results_sv['tmax'][results_sv['sv_mask'] == 1], q=10)}
-
-        max_vals_sv = {'cbf': np.percentile(results_sv['cbf'][results_sv['sv_mask'] == 1], q=90),
-                       'mtt': np.percentile(results_sv['mtt'][results_sv['sv_mask'] == 1], q=90),
-                       'cbv': np.percentile(results_sv['cbv'][results_sv['sv_mask'] == 1], q=90),
-                       'delay': np.percentile(results_sv['delay'][results_sv['sv_mask'] == 1], q=90),
-                       'tmax': np.percentile(results_sv['tmax'][results_sv['sv_mask'] == 1], q=90)}
-
-        for k in range(results_sv['core'].shape[0]):
-            fig = plt.figure(figsize=(9, 4))
-            outer = gridspec.GridSpec(1, 5, wspace=0.2, hspace=0.2)
-            for i, key in zip(range(5), ['cbf', 'mtt', 'cbv', 'delay', 'tmax']):
-                inner = gridspec.GridSpecFromSubplotSpec(2, 1,
-                                                         subplot_spec=outer[i],
-                                                         wspace=0.1,
-                                                         hspace=0.1)
-                ax = plt.Subplot(fig, inner[0])
-                ax.imshow(results[key][k], cmap='jet', vmin=min_vals_ppinn[key], vmax=max_vals_ppinn[key])
-                ax.set_title(param_title[key], fontdict=font)
-                ax.set_xticks([])
-                ax.set_yticks([])
-                # ax.set_axis_off()
-                if i == 0:
-                    ax.set_ylabel('PPINN', fontdict=font)
-                fig.add_subplot(ax)
-                norm = mpl.colors.Normalize(vmin=min_vals_ppinn[key], vmax=max_vals_ppinn[key])
-                cax = inset_axes(
-                    ax,
-                    width="100%",
-                    height="10%",
-                    bbox_to_anchor=(0, -0.2, 1, 1),
-                    bbox_transform=ax.transAxes,
-                    loc="lower center",
-                )
-                cb1 = mpl.colorbar.ColorbarBase(cax, cmap='jet', norm=norm, orientation='horizontal')
-                cb1.outline.set_color('black')
-
-                ax = plt.Subplot(fig, inner[1])
-                ax.imshow(results_sv[key][k], cmap='jet', vmin=min_vals_sv[key], vmax=max_vals_sv[key])
-                # ax.set_title(param_title[key], fontdict=font)
-                ax.set_xticks([])
-                ax.set_yticks([])
-                # ax.set_axis_off()
-                if i == 0:
-                    ax.set_ylabel('Sygno.via', fontdict=font)
-                fig.add_subplot(ax)
-                norm = mpl.colors.Normalize(vmin=min_vals_sv[key], vmax=max_vals_sv[key])
-                cax = inset_axes(
-                    ax,
-                    width="100%",
-                    height="10%",
-                    bbox_to_anchor=(0, -0.2, 1, 1),
-                    bbox_transform=ax.transAxes,
-                    loc="lower center",
-                )
-                cb1 = mpl.colorbar.ColorbarBase(cax, cmap='jet', norm=norm, orientation='horizontal')
-                cb1.outline.set_color('black')
-            if np.sum(results['dwi_seg'][k]) > 0:
-                name = f'visuals/compare/pt_{str(case)}_slice_{str(k)}.png'
-                plt.savefig(name, dpi=100, bbox_inches='tight')
-                plt.close()
+                # mask = results['pred_core'][slice_nr]
+                # contours = measure.find_contours(mask)
+                # for jx, contour in enumerate(contours):
+                #     ax.plot(contour[:, 1], contour[:, 0], linewidth=1, c='limegreen', label='SPPINN infarct core' if jx == 0 else None)
+            elif key == 'cbf':
+                ax.imshow(results[key][slice_nr], cmap=cmap, vmin=min_vals[key], vmax=max_sppinn_cbf[case])
+            elif key == 'cbv':
+                ax.imshow(results[key][slice_nr], cmap=cmap, vmin=min_vals[key], vmax=max_sppinn_cbv[case])
             else:
-                plt.close()
+                ax.imshow(results[key][slice_nr], cmap=cmap, vmin=min_vals[key], vmax=max_vals[key])
 
+            if ix == 0:
+                ax.set_title(param_title[key], fontdict=font)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            # ax.set_axis_off()
+            if i == 0:
+                ax.set_ylabel('SPPINN', fontdict=font)
+            handles1, labels1 = ax.get_legend_handles_labels()
+            fig.add_subplot(ax)
+
+            #     cb1 = mpl.colorbar.ColorbarBase(cax, cmap='jet', norm=norm, orientation='horizontal')
+            #     cb1.outline.set_color('black')
+
+            ax = plt.Subplot(fig, inner[1])
+            if key == 'dwi':
+                image = results[key][slice_nr]
+                image = (image - np.min(image)) / np.ptp(image)
+                ax.imshow(image, cmap=cmap_bw, vmin=0, vmax=1)
+                mask = results['dwi_seg'][slice_nr]
+                contours_dwiseg = measure.find_contours(mask)
+                for jx, contour in enumerate(contours_dwiseg):
+                    ax.plot(contour[:, 1], contour[:, 0], linewidth=0.5, c='red', label='DWI infarct core' if jx == 0 else None)
+                # mask = results_sv['core'][slice_nr]
+                # contours_sv = measure.find_contours(mask)
+                # for jx, contour in enumerate(contours_sv):
+                #     ax.plot(contour[:, 1], contour[:, 0], linewidth=0.5, c='magenta', label='Sygno.via infarct core' if jx == 0 else None)
+                if ix == 1:
+                    handles2, labels2 = ax.get_legend_handles_labels()
+                    handles1.extend(handles2)
+                    labels1.extend(labels2)
+                    # rect = patches.Rectangle((-4, -1), 5, 1, linewidth=1, edgecolor='r', facecolor='none')
+                    # # Add the patch to the Axes
+                    # ax.add_patch(rect)
+                    ax.legend(handles1, labels1, frameon=False, loc='upper center', bbox_to_anchor=(-4, -1, 5, 1),
+                              fancybox=True, shadow=True, ncol=3, prop={'size': 8})
+
+            else:
+
+
+                ax.imshow(results_sv[key][slice_nr], cmap=cmap, vmin=min_vals[key], vmax=max_vals[key])
+            # ax.set_title(param_title[key], fontdict=font)
+            ax.set_xticks([])
+            ax.set_yticks([])
+                # ax.set_axis_off()
+            if i == 0:
+                ax.set_ylabel('Sygno.via', fontdict=font)
+            fig.add_subplot(ax)
+            # if ix ==1:
+            #     fig.legend(frameon=True, loc='upper center', bbox_to_anchor = (0., 1., 1, 1),
+            #               fancybox=True, shadow=False)
+            # loc = 'best', bbox_to_anchor = (0.5, 0., 0.5, 0.5)
+
+
+    name = f'visuals/sppinns_sv.png'
+    plt.savefig(name, dpi=150, bbox_inches='tight')
+    plt.show()
 
 def plot_ppinn_maps(case, slice):
     base = r"C:\Users\lucasdevries\surfdrive\Projects\ppinn\data\results_ppinn_amcctp"
@@ -369,4 +393,9 @@ def plot_ppinn_maps(case, slice):
 
 if __name__ == '__main__':
     # lines_box_plot_amc(method='SV')
-    lines_box_plot_amc(method='SPPINN')
+    # lines_box_plot_amc(method='SPPINN')
+    plot_sv_vs_sppinn({'C102':{'slice': 20},
+                       'C103':{'slice': 16}},
+                      max_sppinn_cbf={'C102': 40,'C103': 50,},
+                      max_sppinn_cbv={'C102': 2.5, 'C103': 2.5,}
+    )

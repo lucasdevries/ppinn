@@ -551,7 +551,7 @@ def load_data_spatiotemporal(gaussian_filter_type, sd=2.5,
 
 def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
                                  folder=r'D:/PPINN_patient_data/AMCCTP',
-                                 case='C102'):
+                                 case='C102', temporal_smoothing=False):
     sygno_peaks = {
         'C102': 346,
         'C103': 421,
@@ -590,7 +590,7 @@ def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
     aif_location = os.path.join(folder, rf'AIF_annotations/{case}/aif.nii.gz')
     vof_location = os.path.join(folder, rf'VOF_annotations/{case}/vof.nii.gz')
     time_matrix = os.path.join(folder, rf'CTP_time_matrix/{case}/matrix.npy')
-    ctp_folder = os.path.join(folder, rf'CTP_nii_registered/{case}/*.nii.gz')
+    ctp_folder = os.path.join(folder, rf'CTP_nii_registered_filtered/{case}/*.nii.gz')
     brainmask = os.path.join(folder, rf'CTP_nii_brainmask/{case}/brainmask.nii.gz')
     dwi_segmentation = os.path.join(folder, rf'MRI_nii_registered/{case}/DWI_seg_registered_corrected.nii.gz')
 
@@ -614,9 +614,12 @@ def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
     aif_time_data = time_data[time_aif_location]
     vof_time_data = time_data[time_vof_location]
 
-    sd_t = 2
-    truncate = np.ceil(2 * sd_t) / sd_t if sd_t != 0 else 0
-    aif_data = gaussian(aif_data, sigma=(sd_t), mode='nearest', truncate=truncate)
+
+    k = np.array([0.25, 0.5, 0.25])
+    aif_data = convolve(aif_data, k, mode='nearest')
+    sd_t = 0
+    # truncate = np.ceil(2 * sd_t) / sd_t if sd_t != 0 else 0
+    # aif_data = gaussian(aif_data, sigma=(sd_t), mode='nearest', truncate=truncate)
     aif_baseline = aif_data[0]
 
     aif_wo_baseline = aif_data - aif_baseline
@@ -647,13 +650,19 @@ def load_data_AMC_spatiotemporal(gaussian_filter_type, sd=2,
 
     tac_baseline = np.mean(image_data_dict['array'][:4], axis=0, keepdims=True)
     image_data_dict['array'] = image_data_dict['array'] - tac_baseline
+    if temporal_smoothing:
+        print('using temporal smoothing on tacs')
+        k = k.reshape(3, 1, 1, 1)
+        image_data_dict['array'] = convolve(image_data_dict['array'].copy(), k, mode='nearest')
     # If smoothing, apply here
     if gaussian_filter_type:
+        print(f'Using gaussian filter type {gaussian_filter_type}')
         image_data_dict['array'] = apply_gaussian_filter_with_mask_amc(gaussian_filter_type,
                                                                        image_data_dict['array'].copy(),
                                                                        complete_mask,
                                                                        sd=sd,
-                                                                       spacing=space)
+                                                                       spacing=space,
+                                                                       sd_t=sd_t)
 
     image_data_dict['array'] = image_data_dict['array'].astype(np.float32)
     image_data_dict['array'] = rearrange(image_data_dict['array'], 't d h w -> d h w t')
@@ -867,24 +876,26 @@ def apply_gaussian_filter_with_mask(type, array, mask, sd):
         else:
             raise NotImplementedError('Gaussian filter variant not implemented.')
 
-def apply_gaussian_filter_with_mask_amc(type, array, mask, sd, spacing):
+def apply_gaussian_filter_with_mask_amc(type, array, mask, sd, spacing, sd_t = 2):
     [dx, dy, dz] = spacing
-    sd_z = (dx * sd) / dz
+    # sd_z = (dx * sd) / dz
     truncate = np.ceil(2 * sd) / sd if sd != 0 else 0
+
+
     mask = np.expand_dims(mask, 0)
     mask = np.repeat(mask, array.shape[0], axis=0)
     if len(array.shape) == 4:
         if type == 'gauss_spatiotemporal':
-            filtered = gaussian(array * mask, sigma=(sd, sd_z, sd, sd), mode='nearest', truncate=truncate)
+            filtered = gaussian(array * mask, sigma=(sd_t, 0, sd, sd), mode='nearest', truncate=truncate)
             with np.errstate(divide='ignore', invalid='ignore'):
-                filtered /= gaussian(mask, sigma=(sd, sd_z, sd, sd), mode='nearest', truncate=truncate)
+                filtered /= gaussian(mask, sigma=(sd_t, 0, sd, sd), mode='nearest', truncate=truncate)
             filtered[np.logical_not(mask)] = 0
             return filtered
         elif type == 'gauss_spatial':
-            filtered = gaussian(array * mask, sigma=(0, sd_z, sd, sd), mode='nearest', truncate=truncate)
+            filtered = gaussian(array * mask, sigma=(0, 0, sd, sd), mode='nearest', truncate=truncate)
             # intermed = gaussian(mask, sigma=(0, sd, sd, sd), mode='nearest', truncate=truncate)
             with np.errstate(divide='ignore', invalid='ignore'):
-                filtered /= gaussian(mask, sigma=(0, sd_z, sd, sd), mode='nearest', truncate=truncate)
+                filtered /= gaussian(mask, sigma=(0, 0, sd, sd), mode='nearest', truncate=truncate)
             filtered[np.logical_not(mask)] = 0
             return filtered
         else:
